@@ -1,0 +1,4 @@
+{
+  "name": "Generic ESP32-C3 (no GPIO assignments)",
+  "target": "esp32c3"
+}

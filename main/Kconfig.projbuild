@@ -1,0 +1,9 @@
+menu "B-T HOME application"
+    config BTH_LOOP_INTERVAL_MS
+        int "Module polling interval (ms)"
+        range 10 1000
+        default 20
+        help
+            All module tick callbacks run sequentially in the application task.
+            Keep callbacks short; use a module-owned task for blocking I/O.
+endmenu

@@ -1,0 +1,2 @@
+# Conservative generic profile. Confirm flash capacity and pins for the actual board.
+CONFIG_ESPTOOLPY_FLASHSIZE_2MB=y

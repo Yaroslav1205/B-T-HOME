@@ -1,0 +1,11 @@
+menu "B-T HOME modules"
+    config BTH_HEARTBEAT_ENABLED
+        bool "Enable diagnostic heartbeat"
+        default y
+
+    config BTH_HEARTBEAT_INTERVAL_MS
+        int "Heartbeat interval (ms)"
+        depends on BTH_HEARTBEAT_ENABLED
+        range 1000 3600000
+        default 5000
+endmenu

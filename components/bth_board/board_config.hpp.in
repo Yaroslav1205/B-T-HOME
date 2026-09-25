@@ -1,0 +1,8 @@
+#pragma once
+
+namespace bth::board {
+inline constexpr const char* id = "@BTH_BOARD@";
+inline constexpr const char* target = "@BTH_BOARD_TARGET@";
+inline constexpr const char* name = R"board(@BTH_BOARD_NAME@)board";
+// Add validated board pins/capabilities here when a concrete board is selected.
+}  // namespace bth::board

@@ -1,0 +1,36 @@
+#include "bth/${name}/${name}.hpp"
+
+namespace bth {
+
+Status ${class_name}::init() noexcept {
+    // Validate configuration and acquire resources here.
+    initialized_ = true;
+    return Status::ok;
+}
+
+Status ${class_name}::start() noexcept {
+    if (!initialized_ || running_) {
+        return Status::invalid_state;
+    }
+    running_ = true;
+    return Status::ok;
+}
+
+Status ${class_name}::tick(std::uint64_t now_ms) noexcept {
+    (void)now_ms;
+    // Keep this short. Move blocking operations to a module-owned worker.
+    return running_ ? Status::ok : Status::invalid_state;
+}
+
+void ${class_name}::stop() noexcept {
+    // Stop/join workers and unregister callbacks, including partial start failure.
+    running_ = false;
+}
+
+void ${class_name}::deinit() noexcept {
+    stop();
+    // Release resources, including those acquired before an init failure.
+    initialized_ = false;
+}
+
+}  // namespace bth

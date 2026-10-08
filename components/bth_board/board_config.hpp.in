@@ -4,5 +4,20 @@ namespace bth::board {
 inline constexpr const char* id = "@BTH_BOARD@";
 inline constexpr const char* target = "@BTH_BOARD_TARGET@";
 inline constexpr const char* name = R"board(@BTH_BOARD_NAME@)board";
-// Add validated board pins/capabilities here when a concrete board is selected.
+inline constexpr int rgb_led_gpio = @BTH_RGB_LED_GPIO@;
+inline constexpr int boot_button_gpio = @BTH_BOOT_BUTTON_GPIO@;
+inline constexpr bool boot_button_active_low = @BTH_BOOT_BUTTON_ACTIVE_LOW@;
+inline constexpr int mains_adc_gpio = @BTH_MAINS_ADC_GPIO@;
+inline constexpr int dc_adc_gpio = @BTH_DC_ADC_GPIO@;
+inline constexpr double dc_divider_ratio = @BTH_DC_DIVIDER_RATIO@;
+inline constexpr int relay_gpio = @BTH_RELAY_GPIO@;
+inline constexpr bool relay_active_high = @BTH_RELAY_ACTIVE_HIGH@;
+inline constexpr bool oled_enabled = @BTH_OLED_ENABLED@;
+inline constexpr int oled_port = @BTH_OLED_PORT@;
+inline constexpr int oled_sda = @BTH_OLED_SDA@;
+inline constexpr int oled_scl = @BTH_OLED_SCL@;
+inline constexpr unsigned oled_speed_hz = @BTH_OLED_SPEED_HZ@;
+inline constexpr unsigned oled_address = @BTH_OLED_ADDRESS@;
+inline constexpr unsigned oled_contrast = @BTH_OLED_CONTRAST@;
+inline constexpr bool oled_internal_pullups = @BTH_OLED_INTERNAL_PULLUPS@;
 }  // namespace bth::board

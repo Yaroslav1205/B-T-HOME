@@ -1,0 +1,9 @@
+menu "B-T HOME Matter"
+    config BTH_MATTER_ENABLED
+        bool "Matter relay over home Wi-Fi"
+        depends on IDF_TARGET_ESP32C6 && BTH_WEB_RELAY_ENABLED && !BTH_ZIGBEE_ENABLED
+        default n
+        help
+            Requires -DBTH_WITH_MATTER=ON and ESP-Matter 1.4.2 on Linux/WSL.
+            Wi-Fi is provisioned by the Matter controller over BLE.
+endmenu

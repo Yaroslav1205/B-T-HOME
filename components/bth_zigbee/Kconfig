@@ -1,0 +1,12 @@
+menu "B-T HOME Zigbee"
+    config BTH_ZIGBEE_ENABLED
+        bool "Enable Zigbee relay endpoint"
+        depends on IDF_TARGET_ESP32C6 && BTH_WEB_RELAY_ENABLED
+        select ZB_ENABLED
+        default n
+        help
+            Standard HA On/Off output on endpoint 1. BOOT selects Zigbee or Wi-Fi
+            configuration mode; they never run simultaneously. A confirmed BOOT
+            GPIO in the board profile is required. Short BOOT press starts pairing.
+            Requires a zb_storage NVS partition. MOES/Tuya compatibility needs device testing.
+endmenu

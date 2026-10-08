@@ -1,0 +1,26 @@
+menu "B-T HOME startup indication"
+    config BTH_STARTUP_BLINK_COUNT
+        int "Digit pulse count (0 disables digit only)"
+        range 0 100
+        default 5
+    config BTH_STARTUP_BLINK_ON_MS
+        int "Digit pulse duration (ms)"
+        range 20 5000
+        default 200
+    config BTH_STARTUP_BLINK_OFF_MS
+        int "Pause between digit pulses (ms)"
+        range 20 5000
+        default 200
+    choice BTH_STARTUP_BLINK_POLARITY
+        prompt "Digit indication mode"
+        default BTH_STARTUP_BLINK_PULSE_LIGHT
+        config BTH_STARTUP_BLINK_PULSE_LIGHT
+            bool "Normally off, light pulses"
+        config BTH_STARTUP_BLINK_PULSE_DARK
+            bool "Normally on, dark pulses"
+    endchoice
+    config BTH_STARTUP_BLINK_REPEAT_PAUSE_MS
+        int "Pause before and between digit groups (ms)"
+        range 200 10000
+        default 2000
+endmenu

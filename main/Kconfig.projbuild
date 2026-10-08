@@ -1,4 +1,10 @@
 menu "B-T HOME application"
+    config BTH_WEB_RELAY_ENABLED
+        bool "Enable relay and authenticated web control"
+        default y
+        help
+            Runs the relay control page over Matter Wi-Fi, or a legacy Wi-Fi AP.
+            Relay GPIO and polarity must be specified by the board profile.
     config BTH_LOOP_INTERVAL_MS
         int "Module polling interval (ms)"
         range 10 1000

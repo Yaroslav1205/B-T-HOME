@@ -3,15 +3,20 @@ param(
     [ValidateSet('build', 'flash', 'monitor', 'menuconfig', 'size', 'reconfigure')]
     [string]$Action = 'build',
     [ValidatePattern('^[a-z][a-z0-9_]*$')]
-    [string]$Board = 'generic_esp32c6',
+    [string]$Board = 'esp32c6_rgb8',
     [string]$Port,
     [string]$IdfPath,
+    [switch]$WifiAp,
     [ValidatePattern('^[D-Zd-z]$')]
     [string]$Drive = 'R'
 )
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+if ($Board -eq 'esp32c6_rgb8' -and -not $WifiAp) {
+    & (Join-Path $PSScriptRoot 'matter.ps1') -Action $Action -Port $Port -IdfPath $IdfPath
+    exit $LASTEXITCODE
+}
 $profilePath = Join-Path $projectRoot "boards\$Board\board.json"
 if (-not (Test-Path -LiteralPath $profilePath)) {
     throw "Unknown board '$Board'. See boards/."
@@ -71,7 +76,8 @@ try {
     $buildDir = Join-Path $buildRoot "build\$Board"
     $pythonPath = (Get-Command python -ErrorAction Stop).Source
     & cmake -S $buildRoot -B $buildDir -G Ninja "-DBTH_BOARD=$Board" `
-        "-DPYTHON=$pythonPath" '-DPYTHON_DEPS_CHECKED=1' '-DCCACHE_ENABLE=0'
+        "-DPYTHON=$pythonPath" '-DPYTHON_DEPS_CHECKED=1' '-DCCACHE_ENABLE=0' `
+        '-DBTH_WINDOWS_MATTER_BRIDGE=OFF' '-DBTH_WITH_MATTER=OFF'
     if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
     if ($Action -eq 'reconfigure') {
         $result = 0

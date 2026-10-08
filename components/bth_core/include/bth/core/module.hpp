@@ -28,6 +28,12 @@ struct Dependencies {
 
 class Module {
 public:
+    Module() = default;
+    // Runtime holds stable addresses; resource-owning modules must not be duplicated.
+    Module(const Module&) = delete;
+    Module& operator=(const Module&) = delete;
+    Module(Module&&) = delete;
+    Module& operator=(Module&&) = delete;
     virtual ~Module() = default;
     // Nonempty, immutable, stable for the entire lifetime of the module.
     virtual const char* id() const noexcept = 0;

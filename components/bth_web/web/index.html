@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B-T HOME · Реле</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2317634f'/%3E%3Ctext x='32' y='33' dy='.35em' text-anchor='middle' font-family='Arial,sans-serif' font-size='30' font-weight='800' fill='white'%3EB-T%3C/text%3E%3C/svg%3E">
+<script>
+// Apply the preference before first paint; storage can be unavailable in private contexts.
+(()=>{let theme;try{theme=localStorage.getItem('bth-theme');}catch{}
+if(theme!=='light'&&theme!=='dark')theme=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+document.documentElement.dataset.theme=theme;})();
+</script>
+<style>
+:root{color-scheme:light;--bg:#f2f5f3;--surface:#fff;--text:#192a28;--muted:#536963;--border:#dde5e1;--input-border:#aabfb4;--accent:#17634f;--accent-hover:#104d3d;--accent-text:#fff;--secondary:#e9efec;--secondary-text:#203e34;--focus:#469976;--error:#a13535;--notice:#e3eee8;--notice-text:#285544;--online:#209475;--offline:#82958d;--shadow:#1a403508;font-family:system-ui,-apple-system,sans-serif;color:var(--text);background:var(--bg)}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#101816;--surface:#1a2521;--text:#edf5ef;--muted:#afc3b8;--border:#34473d;--input-border:#526e5e;--accent:#8bd5b0;--accent-hover:#ade6c8;--accent-text:#10291c;--secondary:#30463a;--secondary-text:#e1f1e6;--focus:#a8e3c3;--error:#ffaaa6;--notice:#263e31;--notice-text:#c2efd5;--online:#8bd5b0;--offline:#8ca89a;--shadow:#00000026}
+*{box-sizing:border-box}body{margin:0;padding:24px}main{max-width:440px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.brand{font-size:18px;font-weight:800;letter-spacing:.1em}.link{font-size:12px;color:var(--muted)}
+.link::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--offline);margin-right:6px}
+.link.online::before{background:var(--online)}article{background:var(--surface);border:1px solid var(--border);border-radius:24px;padding:30px;box-shadow:0 12px 40px var(--shadow)}
+.label{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin:0 0 14px}
+h1{font-size:34px;line-height:1.2;margin:0 0 12px;font-weight:650;letter-spacing:-.04em}
+#detail{color:var(--muted);font-size:14px;line-height:1.6;min-height:48px;margin:0 0 28px}
+button{width:100%;border:0;border-radius:14px;padding:17px;background:var(--accent);color:var(--accent-text);font:600 16px system-ui;cursor:pointer;transition:background .15s}
+button:hover{background:var(--accent-hover)}button.off{background:var(--secondary);color:var(--secondary-text)}button:disabled{opacity:.5;cursor:default}button:focus-visible{outline:3px solid var(--focus);outline-offset:4px}
+#message{min-height:42px;font-size:13px;line-height:1.5;margin:18px 0 0;color:var(--muted)}#message.error{color:var(--error)}
+footer{font-size:12px;line-height:1.6;color:var(--muted);margin:20px 8px}noscript{display:block;color:var(--error);margin-top:20px}
+[hidden]{display:none!important}article+article{margin-top:18px}
+form{display:grid;gap:14px}label{font-size:13px;color:var(--muted);display:grid;gap:6px}
+input{width:100%;border:1px solid var(--input-border);border-radius:10px;padding:12px;font:16px system-ui;background:var(--surface);color:var(--text)}
+input:focus{outline:2px solid var(--focus);outline-offset:1px}h2{font-size:22px;margin:0 0 20px}
+small{color:var(--muted);font-size:12px;line-height:1.5}fieldset{border:0;padding:0;margin:0;display:grid;gap:14px}
+summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
+#logout{width:auto;padding:7px 10px;font-size:12px;margin-left:8px;background:transparent;color:var(--muted)}
+#notice{font-size:14px;line-height:1.6;color:var(--notice-text);background:var(--notice);padding:14px;border-radius:12px;margin-bottom:16px}
+.feedback{font-size:13px;line-height:1.5;min-height:20px;margin:8px 0 0}.error{color:var(--error)}
+.toolbar{display:flex;justify-content:flex-end;margin-bottom:16px}
+#themeToggle{width:auto;min-height:40px;padding:9px 14px;font-size:13px;background:var(--secondary);color:var(--secondary-text);border:1px solid var(--border)}
+#themeToggle:hover{border-color:var(--focus)}input::placeholder{color:var(--muted);opacity:1}
+.voltages{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:0}
+.voltages dt{font-size:13px;color:var(--muted);margin-bottom:8px}.voltages dd{margin:0}
+.voltage-value{display:block;font-size:30px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+.voltage-status{display:block;font-size:12px;color:var(--muted);margin-top:6px;min-height:32px}
+.device-info{margin:0}.device-info dt{font-size:13px;color:var(--muted);margin-bottom:8px}.device-info dd{margin:0;font-family:ui-monospace,monospace;font-size:16px;overflow-wrap:anywhere;user-select:all}
+@media(max-width:380px){body{padding:16px}article{padding:24px}}
+</style>
+</head>
+<body>
+<main>
+<header><span class="brand">B-T HOME</span><span><span id="connection" class="link">З’єднання…</span><button id="logout" hidden>Вийти</button></span></header>
+<div class="toolbar"><button id="themeToggle" type="button" aria-pressed="false">Темна тема</button></div>
+<div id="notice" role="status" hidden></div>
+<article id="loginCard" hidden>
+<h2>Вхід у B-T HOME</h2>
+<form id="loginForm">
+<label>Логін<input id="loginUser" name="username" autocomplete="username" maxlength="32" required value="admin"></label>
+<label>Пароль<input id="loginPassword" name="password" type="password" autocomplete="current-password" maxlength="63" required></label>
+<button id="loginButton" type="submit">Увійти</button>
+<p id="loginMessage" class="feedback" role="status"></p>
+</form>
+</article>
+<section id="app" hidden>
+<article aria-labelledby="deviceHeading">
+<h2 id="deviceHeading">Пристрій</h2>
+<dl class="device-info"><dt id="deviceMacLabel">MAC-адреса Wi-Fi (точка доступу)</dt><dd id="deviceMac">—</dd></dl>
+<p id="matterInfo" hidden><small>Matter через домашній Wi-Fi. Для сполучення натисніть BOOT; код показується в USB-терміналі.</small></p>
+</article>
+<article aria-labelledby="voltageHeading">
+<h2 id="voltageHeading">Напруга</h2>
+<dl class="voltages">
+<div><dt>Мережа</dt><dd><span id="mainsVoltage" class="voltage-value">—</span><span id="mainsStatus" class="voltage-status">Очікуємо вимірювання</span></dd></div>
+<div><dt>Батарея</dt><dd><span id="batteryVoltage" class="voltage-value">—</span><span id="batteryStatus" class="voltage-status">Очікуємо вимірювання</span></dd></div>
+<div><dt>Основне живлення зараз</dt><dd><span id="currentDuration" class="voltage-value">—</span><span id="currentPower" class="voltage-status">Очікуємо вимірювання</span></dd></div>
+<div><dt>Попередній період</dt><dd><span id="previousDuration" class="voltage-value">—</span><span id="previousPower" class="voltage-status">Ще немає даних</span></dd></div>
+</dl>
+</article>
+<article aria-labelledby="state">
+<p class="label">Керування реле</p>
+<h1 id="state" aria-live="polite">Завантаження…</h1>
+<p id="detail">Отримуємо стан від пристрою.</p>
+<button id="toggle" type="button" disabled>Зачекайте</button>
+<p id="message" role="status" aria-live="polite"></p>
+<noscript>Увімкніть JavaScript, щоб керувати реле.</noscript>
+</article>
+<article hidden>
+<details id="zigbeePanel" hidden><summary>Zigbee</summary>
+<p id="zigbeeState" role="status">Очікуємо стан…</p>
+<p><small>Для підключення реле увімкніть додавання Zigbee-пристрою на панелі MOES, потім натисніть «Сполучити».</small></p>
+<form id="zigbeeForm">
+<button id="zigbeeJoin" type="button" disabled>Сполучити · 2 хв</button>
+<button id="zigbeeReset" type="button" class="off" disabled>Скинути Zigbee-мережу</button>
+<small>Скидання видаляє лише прив’язку Zigbee. Стан реле та налаштування Wi-Fi зберігаються.</small>
+<p id="zigbeeMessage" class="feedback" role="status"></p>
+</form>
+</details>
+</article>
+<article>
+<details id="settingsPanel"><summary>Налаштування доступу</summary>
+<form id="settingsForm"><fieldset id="settingsFields">
+<div id="wifiSettings">
+<label>Назва Wi-Fi<input id="ssid" name="ssid" required maxlength="32" autocomplete="off"></label>
+<small>До 32 байтів UTF-8. Після зміни мережі потрібно перепідключитися.</small>
+<label>Новий пароль Wi-Fi<input id="wifiPassword" type="password" minlength="8" maxlength="63" autocomplete="new-password" placeholder="Залишити поточний"></label>
+<small>8–63 латинські символи, цифри або знаки.</small>
+</div>
+<small id="matterWifiNotice" hidden>Домашня мережа Wi-Fi налаштовується застосунком під час сполучення Matter.</small>
+<label>Логін сторінки<input id="webUsername" required maxlength="32" autocomplete="username"></label>
+<label>Новий пароль сторінки<input id="webPassword" type="password" maxlength="63" autocomplete="new-password" placeholder="Залишити поточний"></label>
+<label>Повторіть новий пароль сторінки<input id="webPasswordConfirm" type="password" maxlength="63" autocomplete="new-password"></label>
+<button type="submit">Зберегти налаштування</button>
+</fieldset><p id="settingsMessage" class="feedback" role="status"></p></form>
+</details>
+</article>
+</section>
+<footer>Стан підтверджує пристрій. Після відновлення живлення реле повернеться до збереженого стану.</footer>
+</main>
+<script>
+'use strict';
+const element=id=>document.getElementById(id);
+const themeToggle=element('themeToggle');
+const systemTheme=matchMedia('(prefers-color-scheme: dark)');
+let manualTheme=false;
+try{manualTheme=['light','dark'].includes(localStorage.getItem('bth-theme'));}catch{}
+function applyTheme(theme){
+  const dark=theme==='dark';document.documentElement.dataset.theme=dark?'dark':'light';
+  themeToggle.textContent=dark?'Світла тема':'Темна тема';
+  themeToggle.setAttribute('aria-label',dark?'Увімкнути світлу тему':'Увімкнути темну тему');
+  themeToggle.setAttribute('aria-pressed',String(dark));
+}
+applyTheme(document.documentElement.dataset.theme);
+themeToggle.addEventListener('click',()=>{
+  const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';
+  manualTheme=true;applyTheme(theme);try{localStorage.setItem('bth-theme',theme);}catch{}
+});
+systemTheme.addEventListener('change',event=>{if(!manualTheme)applyTheme(event.matches?'dark':'light');});
+const button=element('toggle'),title=element('state'),detail=element('detail');
+const connection=element('connection'),message=element('message');
+const app=element('app'),loginCard=element('loginCard'),notice=element('notice');
+let current=null,busy=false,changing=false,signedIn=false;
+const voltageExpiry={mains:0,battery:0};
+const voltageLabels={waiting:'Очікуємо вимірювання',uncalibrated:'Потрібне калібрування',invalid:'Недійсне вимірювання',stale:'Немає свіжих даних'};
+function clearVoltages(text='Очікуємо вимірювання'){
+  clearPeriods(text);
+  for(const key of ['mains','battery']){element(key+'Voltage').textContent='—';element(key+'Status').textContent=text;voltageExpiry[key]=0;}
+}
+function clearPeriods(text='Ще немає даних'){
+  for(const key of ['current','previous']){element(key+'Duration').textContent='—';element(key+'Power').textContent=text;}
+}
+function showVoltages(data){
+  for(const key of ['mains','battery']){
+    const reading=data[key];
+    const valid=reading&&reading.status==='ok'&&typeof reading.volts==='number'&&Number.isFinite(reading.volts)&&reading.volts>=0&&
+      typeof reading.age_ms==='number'&&reading.age_ms>=0&&reading.age_ms<2500;
+    element(key+'Voltage').textContent=valid?reading.volts.toFixed(1)+' V':'—';
+    element(key+'Status').textContent=valid?(key==='mains'?'Змінна напруга · RMS':'Постійна напруга'):voltageLabels[reading?.status]||'Дані недоступні';
+    voltageExpiry[key]=valid?Date.now()+2500-reading.age_ms:0;
+  }
+  clearPeriods();
+  if(voltageExpiry.mains)for(const key of ['current','previous']){
+    const period=data[key+'_period'];
+    if(!period||typeof period.present!=='boolean'||!Number.isFinite(period.duration_ms)||period.duration_ms<0)continue;
+    const ms=period.duration_ms;
+    element(key+'Duration').textContent=ms<3600000?Math.floor(ms/60000)+' хв':(Math.floor(ms/360000)/10).toFixed(1)+' год';
+    element(key+'Power').textContent=period.present?(key==='current'?'Живлення є':'Живлення було'):(key==='current'?'Живлення немає':'Живлення не було');
+  }
+}
+async function loadVoltages(){
+  try{
+    const result=await api('/api/voltages');
+    if(result.status===401){showLogin();return;}
+    if(!result.ok)throw new Error('voltages');
+    showVoltages(result.data);
+  }catch{clearVoltages('Немає зв’язку з вимірюваннями');}
+}
+setInterval(()=>{
+  for(const key of ['mains','battery'])if(voltageExpiry[key]&&Date.now()>=voltageExpiry[key]){
+    if(key==='mains')clearPeriods(voltageLabels.stale);
+    element(key+'Voltage').textContent='—';element(key+'Status').textContent=voltageLabels.stale;voltageExpiry[key]=0;
+  }
+},250);
+function notify(text){notice.textContent=text;notice.hidden=!text;}
+function showLogin(text=''){
+  clearZigbee();
+  clearVoltages();
+  signedIn=false;current=null;app.hidden=true;loginCard.hidden=false;element('logout').hidden=true;
+  button.disabled=true;element('loginPassword').value='';element('loginMessage').textContent=text;
+  connection.textContent='Потрібен вхід';connection.className='link';
+}
+function show(state){
+  element('deviceMacLabel').textContent=state.wifi_mode==='matter'?'MAC-адреса Wi-Fi (домашня мережа)':'MAC-адреса Wi-Fi (точка доступу)';
+  element('matterInfo').hidden=state.wifi_mode!=='matter';
+  element('deviceMac').textContent=typeof state.mac==='string'&&/^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(state.mac)?state.mac.toUpperCase():'—';
+  current=state;signedIn=true;app.hidden=false;loginCard.hidden=true;element('logout').hidden=false;
+  connection.textContent='На зв’язку';connection.className='link online';
+  title.textContent=state.output_known?(state.on?'Увімкнено':'Вимкнено'):'Стан невідомий';
+  const saved=state.storage_known&&state.output_known&&state.on===state.saved_on;
+  detail.textContent=saved?'Стан збережено. Він відновиться після перезапуску.':'Не вдалося підтвердити збережений стан.';
+  button.textContent=state.on?'Вимкнути реле':'Увімкнути реле';button.className=state.on?'off':'';
+  button.disabled=!state.ready||!state.output_known||changing;
+  if(!state.ready){message.className='error';message.textContent=state.error==='ok'?'Реле не налаштоване для цієї плати.':'Помилка пристрою. Керування недоступне.';}
+}
+function offline(){
+  clearZigbee();
+  clearVoltages('Немає зв’язку');
+  current=null;connection.textContent='Немає зв’язку';connection.className='link';
+  title.textContent='Стан невідомий';detail.textContent='Перевірте підключення до Wi-Fi пристрою.';
+  button.disabled=true;button.textContent='Очікуємо пристрій';
+  message.className='error';message.textContent='Підтвердження немає. Повторно отримуємо стан…';
+}
+async function api(path,options={}){
+  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);
+  try{
+    const response=await fetch(path,{cache:'no-store',credentials:'same-origin',...options,signal:controller.signal});
+    const data=await response.json();
+    return {data,ok:response.ok,status:response.status};
+  }finally{clearTimeout(timeout);}
+}
+function mutation(method,data){return {method,headers:{'Content-Type':'application/json','X-BTH-Request':'1'},body:JSON.stringify(data)};}
+async function request(options={}){
+  const result=await api('/api/relay',options);
+  if(result.status===401){showLogin('Увійдіть, щоб керувати пристроєм.');return null;}
+  const state=result.data;
+  if(typeof state.on!=='boolean'||typeof state.ready!=='boolean'||typeof state.output_known!=='boolean'||typeof state.storage_known!=='boolean'||typeof state.saved_on!=='boolean')throw new Error('invalid_state');
+  return {state,ok:result.ok};
+}
+const zigbeeLabels={starting:'Запускається',idle:'Не підключено',joining:'Пошук Zigbee-мережі',joined:'Підключено',rejoining:'Відновлення підключення',resetting:'Скидання прив’язки',error:'Помилка Zigbee'};
+function clearZigbee(){
+  element('zigbeeState').textContent='Немає свіжих даних';
+  element('zigbeeJoin').disabled=true;element('zigbeeReset').disabled=true;
+}
+async function loadZigbee(){
+  if(!signedIn)return;
+  try{
+    const result=await api('/api/zigbee');
+    if(result.status===401){showLogin();return;}
+    if(!result.ok)throw new Error('zigbee');
+    const data=result.data;
+    element('zigbeePanel').hidden=data.state==='disabled';
+    element('zigbeePanel').parentElement.hidden=data.state==='disabled';
+    if(data.state==='disabled'){clearZigbee();return;}
+    element('zigbeeState').textContent=(zigbeeLabels[data.state]||'Стан невідомий')+
+      (data.state==='joined'?' · канал '+data.channel:data.state==='joining'?' · '+data.seconds_left+' с':'');
+    element('zigbeeJoin').disabled=data.state!=='idle';
+    element('zigbeeReset').disabled=!['idle','joined','joining','rejoining'].includes(data.state);
+  }catch{clearZigbee();}
+}
+async function zigbeeAction(action){
+  if(busy||!signedIn)return;
+  if(action==='reset'&&!confirm('Видалити прив’язку B-T HOME до Zigbee-мережі?'))return;
+  busy=true;clearZigbee();
+  const feedback=element('zigbeeMessage');feedback.className='feedback';feedback.textContent='Надсилаємо команду…';
+  try{
+    const result=await api('/api/zigbee',mutation('POST',{action}));
+    if(result.status===401){showLogin();return;}
+    if(!result.ok)throw new Error('zigbee');
+    feedback.textContent='Команду прийнято. Очікуємо оновлення стану…';
+    await loadZigbee();
+  }catch{feedback.className='feedback error';feedback.textContent='Команду не підтверджено. Перевірте зв’язок і повторіть.';}
+  finally{busy=false;}
+}
+element('zigbeeJoin').addEventListener('click',()=>zigbeeAction('join'));
+element('zigbeeReset').addEventListener('click',()=>zigbeeAction('reset'));
+async function loadSettings(){
+  const result=await api('/api/settings');
+  if(result.status===401){showLogin();return;}
+  if(!result.ok)throw new Error('settings');
+  element('ssid').value=result.data.ssid;element('webUsername').value=result.data.username;
+  element('wifiSettings').hidden=!!result.data.wifi_managed_by_matter;
+  element('matterWifiNotice').hidden=!result.data.wifi_managed_by_matter;
+  element('wifiPassword').value='';element('webPassword').value='';element('webPasswordConfirm').value='';
+  if(result.data.wifi_pending)notify('Налаштування Wi-Fi збережені, але ще не застосовані. Перезапустіть пристрій.');
+}
+async function refresh(){
+  if(busy)return;busy=true;
+  try{const result=await request();if(result){show(result.state);if(result.state.ready){message.className='';message.textContent='';}await loadVoltages();await loadZigbee();}}
+  catch{offline();}finally{busy=false;}
+}
+button.addEventListener('click',async()=>{
+  if(busy||!current||!current.ready)return;
+  const wanted=!current.on;busy=true;changing=true;button.disabled=true;
+  message.className='';message.textContent='Зберігаємо та очікуємо підтвердження…';
+  try{
+    const result=await request(mutation('PUT',wanted));
+    if(!result)return;
+    show(result.state);
+    if(result.ok&&result.state.ready&&result.state.output_known&&result.state.storage_known&&result.state.on===wanted&&result.state.saved_on===wanted){message.className='';message.textContent='Виконано. Стан збережено.';}
+    else{message.className='error';message.textContent='Зміну не підтверджено. Перевірте стан пристрою.';}
+  }catch{offline();}
+  finally{changing=false;busy=false;button.disabled=!current||!current.ready||!current.output_known;}
+});
+element('loginForm').addEventListener('submit',async event=>{
+  event.preventDefault();if(busy)return;busy=true;element('loginButton').disabled=true;
+  const feedback=element('loginMessage');feedback.className='feedback';feedback.textContent='Перевіряємо…';
+  try{
+    const result=await api('/api/login',mutation('POST',{username:element('loginUser').value,password:element('loginPassword').value}));
+    element('loginPassword').value='';
+    if(!result.ok){feedback.className='feedback error';feedback.textContent=result.status===429?'Забагато спроб. Зачекайте 30 секунд.':'Неправильний логін або пароль.';return;}
+    const state=await request();if(state){show(state.state);await loadVoltages();await loadZigbee();if(signedIn)await loadSettings();notify('');}
+  }catch{feedback.className='feedback error';feedback.textContent='Пристрій не відповідає. Перевірте Wi-Fi.';}
+  finally{busy=false;element('loginButton').disabled=false;}
+});
+element('logout').addEventListener('click',async()=>{
+  if(busy)return;busy=true;
+  try{const result=await api('/api/logout',mutation('POST',{}));if(result.ok){showLogin();notify('');}}
+  catch{notify('Не вдалося завершити сеанс. Перевірте зв’язок.');}
+  finally{busy=false;}
+});
+element('settingsForm').addEventListener('submit',async event=>{
+  event.preventDefault();if(busy)return;
+  const feedback=element('settingsMessage');feedback.className='feedback error';
+  const ssid=element('ssid').value,username=element('webUsername').value;
+  const wifiPassword=element('wifiPassword').value,webPassword=element('webPassword').value;
+  const bytes=value=>new TextEncoder().encode(value).length;
+  if(bytes(ssid)<1||bytes(ssid)>32){feedback.textContent='Назва Wi-Fi має містити від 1 до 32 байтів.';return;}
+  if(wifiPassword&&!/^[\x20-\x7e]{8,63}$/.test(wifiPassword)){feedback.textContent='Пароль Wi-Fi: 8–63 латинські символи, цифри або знаки.';return;}
+  if(!/^[\x20-\x7e]{1,32}$/.test(username)||bytes(webPassword)>63){feedback.textContent='Перевірте логін (1–32 латинські символи) та довжину пароля.';return;}
+  if(webPassword!==element('webPasswordConfirm').value){feedback.textContent='Нові паролі сторінки не збігаються.';return;}
+  busy=true;element('settingsFields').disabled=true;feedback.className='feedback';feedback.textContent='Зберігаємо…';
+  try{
+    const result=await api('/api/settings',mutation('PUT',{ssid,wifi_password:wifiPassword,username,web_password:webPassword}));
+    if(result.status===401){showLogin('Увійдіть повторно.');return;}
+    if(!result.ok){feedback.className='feedback error';feedback.textContent=result.status===400?'Перевірте введені дані.':'Не вдалося підтвердити збереження. Перезапустіть пристрій і перевірте налаштування.';return;}
+    element('wifiPassword').value='';element('webPassword').value='';element('webPasswordConfirm').value='';
+    feedback.textContent='Налаштування збережено.';
+    if(result.data.reconnect){
+      showLogin();notify('Збережено. Підключіться до Wi-Fi «'+result.data.ssid+'» з новими даними та відкрийте http://192.168.4.1.');
+    }else if(result.data.login_required){showLogin('Налаштування збережено. Увійдіть із новим логіном і паролем.');}
+    if(result.data.restart_required)notify('Збережено. Щоб застосувати Wi-Fi «'+result.data.ssid+'», перезапустіть пристрій.');
+  }catch{feedback.className='feedback error';feedback.textContent='Відповіді немає. Якщо мережа змінилася, перепідключіться та перевірте налаштування.';}
+  finally{busy=false;element('settingsFields').disabled=false;}
+});
+async function poll(){if(signedIn)await refresh();setTimeout(poll,1500);}
+(async()=>{await refresh();if(signedIn){try{await loadSettings();}catch{notify('Не вдалося прочитати налаштування. Оновіть сторінку.');}}else if(loginCard.hidden){showLogin('Підключіться до Wi-Fi пристрою.');}poll();})();
+</script>
+</body>
+</html>

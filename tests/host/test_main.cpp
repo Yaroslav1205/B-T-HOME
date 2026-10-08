@@ -4,6 +4,8 @@
 #include <array>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
+#include <type_traits>
 #include <string>
 #include <vector>
 
@@ -11,6 +13,11 @@ using bth::Phase;
 using bth::Runtime;
 using bth::RuntimeState;
 using bth::Status;
+
+static_assert(!std::is_copy_constructible_v<bth::Heartbeat>);
+static_assert(!std::is_move_constructible_v<bth::Heartbeat>);
+static_assert(!std::is_copy_assignable_v<bth::Heartbeat>);
+static_assert(!std::is_move_assignable_v<bth::Heartbeat>);
 
 #define CHECK(condition) do { \
     if (!(condition)) { \
@@ -113,6 +120,67 @@ void tick_failure_stops_all_and_skips_following_ticks() {
     CHECK(runtime.state() == RuntimeState::failed);
 }
 
+void rollback_at_every_position_and_restart() {
+    for (const auto phase : {Phase::init, Phase::start, Phase::tick}) {
+        for (std::size_t failed = 0; failed < 3; ++failed) {
+            std::vector<std::string> events;
+            FakeModule a("a", events), b("b", events), c("c", events);
+            const char* b_deps[] = {"a"};
+            const char* c_deps[] = {"b"};
+            b.needs = {b_deps, 1};
+            c.needs = {c_deps, 1};
+            const std::array<FakeModule*, 3> modules = {&a, &b, &c};
+            Runtime runtime;
+            for (auto* module : modules) {
+                CHECK(runtime.add(*module) == Status::ok);
+            }
+            modules[failed]->fail_at = phase;
+            const auto started = runtime.start();
+            if (phase == Phase::tick) {
+                CHECK(started == Status::ok);
+                CHECK(runtime.tick(100) == Status::hardware_error);
+            } else {
+                CHECK(started == Status::hardware_error);
+            }
+
+            std::vector<std::string> expected;
+            const auto append = [&](std::size_t index, const char* event) {
+                expected.emplace_back(std::string(modules[index]->name) + '.' + event);
+            };
+            const auto initialized = phase == Phase::init ? failed + 1 : modules.size();
+            const auto running = phase == Phase::init ? 0 :
+                (phase == Phase::start ? failed + 1 : modules.size());
+            for (std::size_t i = 0; i < initialized; ++i) { append(i, "init"); }
+            for (std::size_t i = 0; i < running; ++i) { append(i, "start"); }
+            if (phase == Phase::tick) {
+                for (std::size_t i = 0; i <= failed; ++i) { append(i, "tick"); }
+            }
+            for (auto i = running; i > 0; --i) { append(i - 1, "stop"); }
+            for (auto i = initialized; i > 0; --i) { append(i - 1, "deinit"); }
+            CHECK(events == expected);
+            CHECK(runtime.state() == RuntimeState::failed);
+            CHECK(runtime.failure().phase == phase);
+            CHECK(std::string(runtime.failure().module) == modules[failed]->name);
+            CHECK(runtime.start() == Status::invalid_state);
+            CHECK(events == expected);
+            runtime.stop();
+            runtime.stop();
+            CHECK(events == expected);
+
+            modules[failed]->fail_at = Phase::none;
+            events.clear();
+            CHECK(runtime.start() == Status::ok);
+            CHECK(runtime.failure().status == Status::ok);
+            CHECK(runtime.tick(200) == Status::ok);
+            runtime.stop();
+            CHECK(events == (std::vector<std::string>{
+                "a.init", "b.init", "c.init", "a.start", "b.start", "c.start",
+                "a.tick", "b.tick", "c.tick", "c.stop", "b.stop", "a.stop",
+                "c.deinit", "b.deinit", "a.deinit"}));
+        }
+    }
+}
+
 void missing_dependency_has_no_side_effects() {
     std::vector<std::string> events;
     FakeModule module("consumer", events);
@@ -183,17 +251,16 @@ void registration_rejects_bad_ids_and_duplicates() {
 void capacity_is_bounded() {
     std::vector<std::string> events;
     std::array<std::string, Runtime::max_modules + 1> names;
-    std::vector<FakeModule> modules;
-    modules.reserve(names.size());
+    std::array<std::optional<FakeModule>, Runtime::max_modules + 1> modules;
     for (std::size_t i = 0; i < names.size(); ++i) {
         names[i] = "module_" + std::to_string(i);
-        modules.emplace_back(names[i].c_str(), events);
+        modules[i].emplace(names[i].c_str(), events);
     }
     Runtime runtime;
     for (std::size_t i = 0; i < Runtime::max_modules; ++i) {
-        CHECK(runtime.add(modules[i]) == Status::ok);
+        CHECK(runtime.add(*modules[i]) == Status::ok);
     }
-    CHECK(runtime.add(modules.back()) == Status::capacity_exceeded);
+    CHECK(runtime.add(*modules.back()) == Status::capacity_exceeded);
     CHECK(runtime.size() == Runtime::max_modules);
 }
 
@@ -277,12 +344,40 @@ void heartbeat_rejects_invalid_configuration_and_state() {
     CHECK(sink.reports.empty());
 }
 
+void test_startup_blink();
+void test_relay();
+void test_access();
+void test_dc();
+void test_web_voltage();
+void test_zigbee();
+void test_relay_service();
+void test_zigbee_storage();
+void test_radio();
+void test_matter();
+void test_oled();
+void test_mains();
+void test_battery();
+
 int main() {
     const struct { const char* name; void (*run)(); } tests[] = {
+        {"mains RMS and lifecycle", test_mains},
+        {"DC voltage", test_dc},
+        {"Battery estimate and persistence", test_battery},
+        {"Web voltage freshness", test_web_voltage},
+        {"Zigbee pairing window", test_zigbee},
+        {"Relay concurrent producers", test_relay_service},
+        {"Zigbee NVS initialization", test_zigbee_storage},
+        {"Radio modes and BOOT gestures", test_radio},
+        {"Matter relay callback lifecycle", test_matter},
+        {"OLED display", test_oled},
+        {"access settings", test_access},
+        {"relay persistence and failures", test_relay},
+        {"startup blink", test_startup_blink},
         {"successful lifecycle", successful_lifecycle},
         {"init rollback", init_failure_cleans_partial_module},
         {"start rollback", start_failure_stops_partial_module},
         {"tick rollback", tick_failure_stops_all_and_skips_following_ticks},
+        {"rollback positions and restart", rollback_at_every_position_and_restart},
         {"missing dependency", missing_dependency_has_no_side_effects},
         {"order and cycles", reversed_and_cyclic_dependencies_are_rejected},
         {"self dependency", self_dependency_is_rejected},

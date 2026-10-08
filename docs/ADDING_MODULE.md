@@ -65,7 +65,10 @@ if (runtime.add(temperature_sensor) != bth::Status::ok) {
 
 ## 4. Перевірте поведінку
 
-Додайте portable джерела й include path до `tests/host/CMakeLists.txt`; створіть fake
+Додайте окрему бібліотеку для portable-джерел у `tests/host/CMakeLists.txt` за
+зразком `bth_heartbeat`: власний include path, явний `target_link_libraries` для
+залежностей і підключення до `bth_tests`. Додайте ціль до обох списків перевірки
+параметрів компіляції (C++17, попередження, без exceptions і RTTI). Створіть fake
 для апаратного інтерфейсу. Перевірте корисну поведінку, помилки отримання ресурсів,
 очищення часткового стану й повторний запуск, а не лише повернення `ok` із каркаса.
 

@@ -1,0 +1,10 @@
+menu "B-T HOME mains measurement"
+config BTH_MAINS_MILLIVOLTS_PER_COUNT
+    int "Calibrated mains millivolts per ADC RMS count (0 = uncalibrated)"
+    range 0 100000
+    default 0
+    help
+        Set to round(1000 * reference mains Vrms / reported ADC RMS).
+        Includes the module gain and external voltage divider. Recalibrate
+        after changing the potentiometer, divider or ADC.
+endmenu

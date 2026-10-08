@@ -1,0 +1,5 @@
+dependencies:
+  espressif/esp-zigbee-lib:
+    version: "2.0.4"
+    rules:
+      - if: "target == esp32c6"

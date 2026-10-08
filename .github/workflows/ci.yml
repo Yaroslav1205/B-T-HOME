@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: [generic_esp32c6, generic_esp32c3, generic_esp32s3, generic_esp32]
+        board: [esp32c6_rgb8, generic_esp32c6, generic_esp32c3, generic_esp32s3, generic_esp32]
     steps:
       - uses: actions/checkout@v4
       - name: Build
@@ -31,4 +31,4 @@ jobs:
         run: |
           . "$IDF_PATH/export.sh"
           unset IDF_TARGET
-          idf.py -B "build/${{ matrix.board }}" -D "BTH_BOARD=${{ matrix.board }}" build
+          idf.py -B "build/${{ matrix.board }}" -D "BTH_BOARD=${{ matrix.board }}" -D BTH_WITH_MATTER=OFF build

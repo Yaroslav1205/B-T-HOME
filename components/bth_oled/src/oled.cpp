@@ -5,6 +5,23 @@
 
 namespace bth {
 namespace {
+// Fit the 23 mm raster into a 19 mm enclosure window offset 3 mm from the left.
+// Merge columns rather than dropping thin strokes; preserve all 32 rows.
+OledFrame fit_window(const OledFrame& source) noexcept {
+    constexpr int visible_width = 128 * 19 / 23;
+    constexpr int offset_x = (128 * 3 + 23 / 2) / 23;  // Round to 17 pixels.
+    static_assert(offset_x + visible_width <= 128);
+    int left = 128;
+    for (int x = 0; x < 128; ++x)
+        for (int page = 0; page < 4; ++page)
+            if (source[page * 128 + x] != 0) left = std::min(left, x);
+    OledFrame result{};
+    for (int x = left; x < 128; ++x)
+        for (int page = 0; page < 4; ++page)
+            result[page * 128 + offset_x + (x - left) * visible_width / 128] |= source[page * 128 + x];
+    return result;
+}
+
 void pixel(OledFrame& frame, int x, int y) noexcept {
     if (x >= 0 && x < 128 && y >= 0 && y < 32) {
         frame[static_cast<std::size_t>(y / 8 * 128 + x)] |=
@@ -85,7 +102,7 @@ OledFrame render_mains_period(const MainsPeriod& period, bool previous) noexcept
     };
     if (!period.known) {
         render_duration("---:--:--");
-        return frame;
+        return fit_window(frame);
     }
     constexpr std::uint64_t max_minutes = 999ULL * 24 * 60 + 23 * 60 + 59;
     const auto total_minutes = std::min(period.duration_ms / 60000, max_minutes);
@@ -98,7 +115,7 @@ OledFrame render_mains_period(const MainsPeriod& period, bool previous) noexcept
                   static_cast<unsigned long long>(hours),
                   static_cast<unsigned long long>(minutes));
     render_duration(text);
-    return frame;
+    return fit_window(frame);
 }
 
 OledFrame render_relay(bool on, bool valid) noexcept {
@@ -131,7 +148,7 @@ OledFrame render_relay(bool on, bool valid) noexcept {
         for (int i = 0; i < (on ? 5 : 4); ++i)
             glyph(on ? enabled[i] : disabled[i], (on ? 35 : 41)+i*12, 18);
     }
-    return frame;
+    return fit_window(frame);
 }
 
 OledFrame render_ipv4(const std::array<std::uint8_t, 4>& address) noexcept {
@@ -168,7 +185,7 @@ OledFrame render_ipv4(const std::array<std::uint8_t, 4>& address) noexcept {
         }
         x += *c == '.' ? 4 : 9;
     }
-    return frame;
+    return fit_window(frame);
 }
 
 OledFrame render_startup_splash() noexcept {
@@ -189,7 +206,7 @@ OledFrame render_startup_splash() noexcept {
             for (int col = 0; col < 5; ++col)
                 if (glyphs[glyph][row] & (1U << (4 - col)))
                     bar(frame, 17 + glyph * 12 + col * 2, 5 + row * 3, 2, 3);
-    return frame;
+    return fit_window(frame);
 }
 
 OledFrame render_voltage(double volts, bool valid, VoltageKind kind) noexcept {
@@ -224,7 +241,7 @@ OledFrame render_voltage(double volts, bool valid, VoltageKind kind) noexcept {
         bar(frame, 112 + inset, y, 3, 1);
         bar(frame, 125 - inset, y, 3, 1);
     }
-    return frame;
+    return fit_window(frame);
 }
 
 std::array<char, 24> format_battery_line(double volts, bool valid, const BatteryEstimate& estimate) noexcept {
@@ -291,7 +308,7 @@ OledFrame render_battery(double volts, bool valid, const BatteryEstimate& estima
         }
         x += width(*c);
     }
-    return frame;
+    return fit_window(frame);
 }
 
 Status OledModule::init() noexcept {
@@ -360,6 +377,12 @@ void OledModule::report(const MainsReading& reading) noexcept {
         auto& average = pages_[page_count_];
         if (reading.valid && reading.calibrated && std::isfinite(reading.volts) &&
             reading.volts >= 0 && reading.volts < 999.95) {
+            // Confirmed outage: retain the last mains average without adding
+            // low-voltage samples. Fresh outage reports keep it visible.
+            if (reading.volts < 100.0) {
+                average.fresh = true;
+                return;
+            }
             if (average_count_ == average_samples_.size()) {
                 average_sum_ -= average_samples_[average_next_];
             } else {

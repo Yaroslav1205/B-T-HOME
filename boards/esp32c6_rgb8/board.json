@@ -4,25 +4,27 @@
   "rgb_led_gpio": 8,
   "boot_button_gpio": 9,
   "boot_button_active_low": true,
-  "relay_gpio": 3,
+  "relay_gpio": 19,
   "relay_active_high": true,
+  "buzzer_gpio": 21,
+  "buzzer_active_high": true,
   "oled": {
     "enabled": true,
     "controller": "ssd1306",
     "width": 128,
     "height": 32,
     "port": 0,
-    "sda": 16,
-    "scl": 17,
+    "sda": 23,
+    "scl": 15,
     "speed_hz": 100000,
     "address": 60,
     "contrast": 143,
     "internal_pullups": true,
     "reset_gpio": -1
   },
-  "mains_adc_gpio": 0,
+  "mains_adc_gpio": 1,
   "dc_input": {
-    "gpio": 1,
+    "gpio": 0,
     "upper_ohms": 120000,
     "lower_ohms": 10000
   }

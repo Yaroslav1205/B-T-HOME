@@ -5,7 +5,7 @@
 namespace bth {
 Status BatteryModule::init() noexcept {
     if (acquired_) return Status::invalid_state;
-    if (!config_.capacity_mah || !config_.discharge_ma || !config_.charge_ma ||
+    if (!config_.capacity_mah || !config_.discharge_ua || !config_.charge_ma ||
         !std::isfinite(config_.cutoff_volts) || config_.cutoff_volts <= 0)
         return Status::invalid_argument;
     acquired_ = true;
@@ -22,6 +22,7 @@ Status BatteryModule::init() noexcept {
         result = store_.save(charge_);
         if (result != Status::ok) return result;
     }
+    charge_ *= 1000; // Loaded/saved NVS units are mA*ms; runtime units are uA*ms.
     saved_charge_ = charge_;
     save_failed_ = save_due_ = false;
     initialized_ = true;
@@ -53,14 +54,14 @@ Status BatteryModule::tick(std::uint64_t now) noexcept {
     const bool mains_known = mains_received_ && mains_valid_ && now >= mains_at_ && now - mains_at_ < freshness_ms;
     const bool dc_known = dc_received_ && dc_valid_ && now >= dc_at_ && now - dc_at_ < freshness_ms;
     const bool valid = mains_known && dc_known;
-    const auto capacity = std::uint64_t{config_.capacity_mah} * 3600000;
+    const auto capacity = std::uint64_t{config_.capacity_mah} * 3600000000ULL;
     // Integrate the preceding known interval. Never invent charge during gaps.
     if (timed_ && previous_valid_ && valid && now >= last_tick_ && now - last_tick_ < freshness_ms) {
         const auto elapsed = now - last_tick_;
         if (previous_mains_) {
-            charge_ += std::min(capacity - charge_, elapsed * config_.charge_ma);
+            charge_ += std::min(capacity - charge_, elapsed * config_.charge_ma * 1000ULL);
         } else {
-            charge_ -= std::min(charge_, elapsed * config_.discharge_ma);
+            charge_ -= std::min(charge_, elapsed * config_.discharge_ua);
         }
     }
     if (!timed_ || now < last_tick_) last_save_ = now;
@@ -74,12 +75,12 @@ Status BatteryModule::tick(std::uint64_t now) noexcept {
     timed_ = true;
     previous_valid_ = valid;
     previous_mains_ = mains_present_;
-    sink_.report_battery({charge_ / (std::uint64_t{config_.discharge_ma} * 60000),
+    sink_.report_battery({charge_ / (std::uint64_t{config_.discharge_ua} * 60000),
                           valid, mains_known, mains_known && mains_present_});
     return Status::ok;
 }
 Status BatteryModule::save() noexcept {
-    const auto result = store_.save(charge_);
+    const auto result = store_.save(charge_ / 1000);
     save_failed_ = result != Status::ok;
     if (result == Status::ok) {
         saved_charge_ = charge_;

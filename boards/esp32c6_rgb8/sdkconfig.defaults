@@ -1,16 +1,21 @@
 # Physical flash capacity confirmed by the device boot log (4096k).
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
-# GPIO16/17 belong to OLED; route the console through native USB.
+# Route the console through native USB.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
-CONFIG_BTH_ZIGBEE_ENABLED=n
-CONFIG_ZB_ENABLED=n
+CONFIG_BTH_MATTER_ENABLED=n
+CONFIG_BTH_ZIGBEE_ENABLED=y
+CONFIG_ZB_ENABLED=y
+CONFIG_ZB_ZED=y
+CONFIG_ZB_RADIO_NATIVE=y
 CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="boards/esp32c6_rgb8/partitions.csv"
 
-# Installed ZMPT101B: 243 V reference / 179.354 ADC RMS counts.
+# Installed ZMPT101B: round(1355 * 237 / 239.5) = 1341.
 # Recalibrate after changing the sensor gain or the 15k/10k divider.
-CONFIG_BTH_MAINS_MILLIVOLTS_PER_COUNT=1355
+CONFIG_BTH_MAINS_MILLIVOLTS_PER_COUNT=1341
+# Backup voltage: 9.8 V reference / 11.2 V reported = 0.875.
+CONFIG_BTH_DC_CALIBRATION_PERMILLE=875

@@ -47,8 +47,13 @@ add_library(bth_dc STATIC "${ROOT}/components/bth_dc/src/dc.cpp")
 target_include_directories(bth_dc PUBLIC "${ROOT}/components/bth_dc/include")
 target_link_libraries(bth_dc PUBLIC bth_core)
 
-add_executable(bth_tests test_battery.cpp test_main.cpp test_mains.cpp test_dc.cpp test_oled.cpp test_startup_blink.cpp test_relay.cpp test_access.cpp test_web_voltage.cpp test_zigbee.cpp test_relay_service.cpp
+add_library(bth_buzzer STATIC "${ROOT}/components/bth_buzzer/src/buzzer.cpp")
+target_include_directories(bth_buzzer PUBLIC "${ROOT}/components/bth_buzzer/include")
+target_link_libraries(bth_buzzer PUBLIC bth_core bth_mains)
+
+add_executable(bth_tests test_buzzer.cpp test_battery.cpp test_main.cpp test_mains.cpp test_dc.cpp test_oled.cpp test_startup_blink.cpp test_relay.cpp test_access.cpp test_web_voltage.cpp test_web_request.cpp test_zigbee.cpp test_relay_service.cpp
     "${ROOT}/components/bth_platform/src/relay_service.cpp"
+    "${ROOT}/components/bth_platform/src/esp_gpio_led.cpp" test_gpio_led.cpp
     "${ROOT}/components/bth_zigbee/src/storage.cpp" test_zigbee_storage.cpp test_radio.cpp test_matter.cpp)
 target_include_directories(bth_tests PRIVATE "${ROOT}/components/bth_matter/include")
 target_include_directories(bth_tests PRIVATE "${CMAKE_CURRENT_LIST_DIR}/idf_stubs")
@@ -56,12 +61,39 @@ target_include_directories(bth_tests PRIVATE "${CMAKE_CURRENT_LIST_DIR}/freertos
 find_package(Threads REQUIRED)
 target_link_libraries(bth_tests PRIVATE Threads::Threads)
 target_include_directories(bth_tests PRIVATE "${ROOT}/components/bth_web/include" "${ROOT}/components/bth_zigbee/include")
-target_link_libraries(bth_tests PRIVATE bth_radio bth_core bth_heartbeat bth_startup_blink bth_relay bth_access bth_oled bth_mains bth_dc)
+target_link_libraries(bth_tests PRIVATE bth_buzzer bth_radio bth_core bth_heartbeat bth_startup_blink bth_relay bth_access bth_oled bth_mains bth_dc)
 if(MSVC)
     target_compile_options(bth_tests PRIVATE /EHsc)
 endif()
 
-foreach(target IN ITEMS bth_battery bth_radio bth_core bth_heartbeat bth_startup_blink bth_relay bth_access bth_oled bth_mains bth_dc bth_tests)
+add_executable(bth_buzzer_settings_tests test_buzzer_settings.cpp
+    "${ROOT}/components/bth_platform/src/buzzer_settings.cpp")
+target_include_directories(bth_buzzer_settings_tests PRIVATE "${CMAKE_CURRENT_LIST_DIR}/idf_stubs"
+    "${CMAKE_CURRENT_LIST_DIR}/freertos" "${ROOT}/components/bth_platform/include")
+target_link_libraries(bth_buzzer_settings_tests PRIVATE bth_buzzer)
+if(MSVC)
+    target_compile_options(bth_buzzer_settings_tests PRIVATE /EHsc)
+endif()
+add_test(NAME buzzer_settings_persistence COMMAND bth_buzzer_settings_tests)
+
+add_executable(bth_access_store_tests test_access_store.cpp "${ROOT}/components/bth_platform/src/access_store.cpp")
+target_include_directories(bth_access_store_tests PRIVATE "${ROOT}/components/bth_platform/include" idf_stubs)
+target_link_libraries(bth_access_store_tests PRIVATE bth_access bth_radio)
+if(MSVC)
+    target_compile_options(bth_access_store_tests PRIVATE /EHsc)
+endif()
+add_test(NAME access_migration_and_radio_persistence COMMAND bth_access_store_tests)
+
+add_executable(bth_wifi_ap_tests test_wifi_ap.cpp "${ROOT}/components/bth_platform/src/wifi_ap.cpp")
+target_include_directories(bth_wifi_ap_tests PRIVATE "${ROOT}/components/bth_platform/include" idf_stubs)
+target_compile_definitions(bth_wifi_ap_tests PRIVATE CONFIG_ESP_WIFI_SOFTAP_SUPPORT=1)
+target_link_libraries(bth_wifi_ap_tests PRIVATE bth_access bth_radio)
+if(MSVC)
+    target_compile_options(bth_wifi_ap_tests PRIVATE /EHsc)
+endif()
+add_test(NAME wifi_ap_dhcp_and_cleanup COMMAND bth_wifi_ap_tests)
+
+foreach(target IN ITEMS bth_wifi_ap_tests bth_access_store_tests bth_buzzer_settings_tests bth_buzzer bth_battery bth_radio bth_core bth_heartbeat bth_startup_blink bth_relay bth_access bth_oled bth_mains bth_dc bth_tests)
     set_target_properties(${target} PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES CXX_EXTENSIONS NO)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4 /WX /permissive-)
@@ -71,7 +103,7 @@ foreach(target IN ITEMS bth_battery bth_radio bth_core bth_heartbeat bth_startup
 endforeach()
 
 # Check portable firmware code without exceptions or RTTI; test helpers may use them.
-foreach(target IN ITEMS bth_battery bth_radio bth_core bth_heartbeat bth_startup_blink bth_relay bth_access bth_oled bth_mains bth_dc)
+foreach(target IN ITEMS bth_buzzer bth_battery bth_radio bth_core bth_heartbeat bth_startup_blink bth_relay bth_access bth_oled bth_mains bth_dc)
     if(MSVC)
         target_compile_options(${target} PRIVATE /EHs-c- /GR-)
     else()
@@ -79,3 +111,4 @@ foreach(target IN ITEMS bth_battery bth_radio bth_core bth_heartbeat bth_startup
     endif()
 endforeach()
 add_test(NAME module_lifecycle_and_heartbeat COMMAND bth_tests)
+set_tests_properties(module_lifecycle_and_heartbeat PROPERTIES TIMEOUT 30)

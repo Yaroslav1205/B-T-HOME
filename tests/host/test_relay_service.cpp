@@ -11,7 +11,7 @@
 #include <vector>
 
 using namespace std::chrono_literals;
-#define CHECK_RS(c) do { if (!(c)) { std::cerr << "relay service:" << __LINE__ << ": " #c "\n"; std::exit(EXIT_FAILURE); } } while(false)
+#define CHECK_RS(c) do { if (!(c)) { std::cerr << "relay service:" << __LINE__ << ": " #c "\n"; std::_Exit(EXIT_FAILURE); } } while(false)
 struct TestQueue {
     unsigned capacity, size;
     std::mutex mutex;
@@ -23,6 +23,7 @@ namespace {
 std::vector<std::thread> workers;
 bool fail_task = false;
 unsigned queues = 0;
+int fail_queue_after = -1;
 template<class Predicate>
 bool await_queue(TestQueue& q, std::unique_lock<std::mutex>& lock, TickType_t wait, Predicate ready) {
     if (wait == portMAX_DELAY) { q.changed.wait(lock, ready); return true; }
@@ -58,7 +59,12 @@ struct Store final : bth::RelayStore {
     void deinit() noexcept override {}
 };
 }
-QueueHandle_t xQueueCreate(UBaseType_t capacity, UBaseType_t size) { ++queues; return new TestQueue(capacity,size); }
+QueueHandle_t xQueueCreate(UBaseType_t capacity, UBaseType_t size) {
+    if (fail_queue_after == 0) return nullptr;
+    if (fail_queue_after > 0) --fail_queue_after;
+    ++queues;
+    return new TestQueue(capacity,size);
+}
 BaseType_t xQueueSend(QueueHandle_t q, const void* item, TickType_t wait) {
     std::unique_lock<std::mutex> lock(q->mutex);
     if (!await_queue(*q, lock, wait, [&]{ return q->items.size() < q->capacity; })) return pdFALSE;
@@ -99,7 +105,18 @@ void test_relay_service() {
     Output output; Store store;
     bth::RelayController controller(output,store);
     bth::RelayService service(controller,true);
+    CHECK_RS(service.start() == bth::Status::invalid_state);
+    for (int allocation = 0; allocation < 4; ++allocation) {
+        fail_queue_after = allocation;
+        CHECK_RS(service.init() == bth::Status::no_memory);
+        CHECK_RS(service.start() == bth::Status::invalid_state);
+        service.deinit(); service.deinit();
+        CHECK_RS(queues == 0);
+    }
+    fail_queue_after = -1;
     CHECK_RS(service.init() == bth::Status::ok && service.start() == bth::Status::ok);
+    CHECK_RS(service.init() == bth::Status::invalid_state && queues == 4);
+    CHECK_RS(service.start() == bth::Status::invalid_state && workers.size() == 1);
     output.entered = false; output.blocked = true;
     CHECK_RS(service.post(true));
     eventually([&]{return output.entered.load();});
@@ -118,11 +135,19 @@ void test_relay_service() {
     CHECK_RS(service.request(false,result) && result.ready && !result.on && !result.saved_on);
     CHECK_RS(service.post(true));
     service.stop(); // Drains accepted commands and joins before releasing resources.
+    CHECK_RS(!service.snapshot().ready && !service.snapshot().on && service.snapshot().saved_on);
+    CHECK_RS(!service.post(false) && service.idle());
+    CHECK_RS(service.request(false, result) && !result.ready);
+    service.stop();
+    CHECK_RS(service.start() == bth::Status::ok && service.snapshot().on);
+    CHECK_RS(service.request(false, result) && result.ready && !result.on);
+    CHECK_RS(service.request(true, result) && result.ready && result.on);
     service.deinit(); service.deinit(); join_workers();
     CHECK_RS(queues == 0 && !output.on && store.saved);
     CHECK_RS(service.init() == bth::Status::ok);
     fail_task = true;
     CHECK_RS(service.start() == bth::Status::no_memory);
+    CHECK_RS(!service.snapshot().ready && !service.post(false) && service.idle());
     service.stop(); service.deinit(); fail_task = false;
     CHECK_RS(queues == 0 && !output.on);
     CHECK_RS(service.init() == bth::Status::ok && service.start() == bth::Status::ok);
@@ -135,7 +160,9 @@ void test_relay_service() {
     service.deinit(); join_workers();
     CHECK_RS(queues == 0);
     bth::RelayService unavailable(controller,false);
+    CHECK_RS(unavailable.start() == bth::Status::invalid_state);
     CHECK_RS(unavailable.init() == bth::Status::ok && unavailable.start() == bth::Status::ok);
+    CHECK_RS(unavailable.start() == bth::Status::invalid_state);
     CHECK_RS(!unavailable.post(true));
     unavailable.deinit(); CHECK_RS(queues == 0);
 }

@@ -1,11 +1,14 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('build', 'flash', 'monitor', 'menuconfig', 'size', 'reconfigure')]
+    [ValidateSet('build', 'flash', 'monitor', 'menuconfig', 'size', 'size-components', 'size-files', 'reconfigure')]
     [string]$Action = 'build',
     [ValidatePattern('^[a-z][a-z0-9_]*$')]
     [string]$Board = 'esp32c6_rgb8',
     [string]$Port,
     [string]$IdfPath,
+    [string]$IdeBuildPath,
+    [switch]$Matter,
+    # Retained for existing native-build commands; native is now the default.
     [switch]$WifiAp,
     [ValidatePattern('^[D-Zd-z]$')]
     [string]$Drive = 'R'
@@ -13,7 +16,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-if ($Board -eq 'esp32c6_rgb8' -and -not $WifiAp) {
+if ($Matter -and $WifiAp) { throw 'Choose either -Matter or -WifiAp.' }
+if ($Matter) {
+    if ($Board -ne 'esp32c6_rgb8') { throw 'Matter is configured only for esp32c6_rgb8.' }
     & (Join-Path $PSScriptRoot 'matter.ps1') -Action $Action -Port $Port -IdfPath $IdfPath
     exit $LASTEXITCODE
 }
@@ -77,7 +82,7 @@ try {
     $pythonPath = (Get-Command python -ErrorAction Stop).Source
     & cmake -S $buildRoot -B $buildDir -G Ninja "-DBTH_BOARD=$Board" `
         "-DPYTHON=$pythonPath" '-DPYTHON_DEPS_CHECKED=1' '-DCCACHE_ENABLE=0' `
-        '-DBTH_WINDOWS_MATTER_BRIDGE=OFF' '-DBTH_WITH_MATTER=OFF'
+        '-DBTH_WINDOWS_NATIVE_BRIDGE=OFF' '-DBTH_WINDOWS_MATTER_BRIDGE=OFF' '-DBTH_WITH_MATTER=OFF'
     if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
     if ($Action -eq 'reconfigure') {
         $result = 0
@@ -86,6 +91,14 @@ try {
         $target = if ($Action -eq 'build') { 'all' } else { $Action }
         & cmake --build $buildDir --target $target
         $result = $LASTEXITCODE
+        if ($result -eq 0 -and $Action -in @('build', 'flash') -and $Board -eq 'esp32c6_rgb8') {
+            if (-not $IdeBuildPath) {
+                $IdeBuildPath = Join-Path $projectRoot 'build\vscode-native-esp32c6_rgb8'
+            }
+            & $pythonPath (Join-Path $PSScriptRoot 'vscode-native\export.py') `
+                --destination $IdeBuildPath
+            $result = $LASTEXITCODE
+        }
     }
 }
 finally {

@@ -1,30 +1,52 @@
 {
-    "cmake.configureOnOpen": false,
-    "cmake.configureOnEdit": false,
-    "files.watcherExclude": {
-        "**/build/**": true,
-        "**/managed_components/**": true
-    },
-    "search.exclude": {
-        "**/build/**": true,
-        "**/managed_components/**": true
-    },
-    "idf.currentSetup": "C:/Espressif/frameworks/esp-idf-v5.4/",
-    "idf.customExtraVars": {
-        "IDF_TARGET": "esp32c6",
-        "IDF_CCACHE_ENABLE": "0",
-        "BTH_WINDOWS_MATTER_BRIDGE": "ON"
-    },
-    "idf.buildPath": "${workspaceFolder}/build/matter-esp32c6_rgb8",
-    "idf.sdkconfigFilePath": "${workspaceFolder}/build/matter-esp32c6_rgb8/sdkconfig",
-    "idf.cmakeCompilerArgs": ["-G", "Ninja", "-DBTH_WINDOWS_MATTER_BRIDGE=ON"],
-    "idf.enableSizeTaskAfterBuildTask": false,
-    "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-18.1.2_20240912\\esp-clang\\bin\\clangd.exe",
-    "clangd.arguments": [
-      "--background-index",
-      "--query-driver=**",
-      "--compile-commands-dir=c:\\WORK\\R A K U R S\\B-T HOME/build/matter-esp32c6_rgb8"
-    ],
-    "idf.port": "COM11",
-    "idf.flashType": "UART"
+  "cmake.configureOnOpen": false,
+  "cmake.configureOnEdit": false,
+  "files.watcherExclude": {
+    "**/build/**": true,
+    "**/managed_components/**": true
+  },
+  "search.exclude": {
+    "**/build/**": true,
+    "**/managed_components/**": true
+  },
+  "idf.currentSetup": "C:/Espressif/frameworks/esp-idf-v5.4/",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32c6",
+    "IDF_CCACHE_ENABLE": "0",
+    "BTH_WINDOWS_MATTER_BRIDGE": "OFF",
+    "BTH_WINDOWS_NATIVE_BRIDGE": "ON"
+  },
+  "idf.buildPath": "${workspaceFolder}/build/vscode-native-esp32c6_rgb8",
+  "idf.sdkconfigFilePath": "${workspaceFolder}/build/esp32c6_rgb8/sdkconfig",
+  "idf.cmakeCompilerArgs": [
+    "-G",
+    "Ninja",
+    "-DBTH_WINDOWS_NATIVE_BRIDGE=ON",
+    "-DBTH_WINDOWS_MATTER_BRIDGE=OFF",
+    "-DBTH_WITH_MATTER=OFF"
+  ],
+  "idf.enableSizeTaskAfterBuildTask": true,
+  "idf.enableCCache": false,
+  "idf.openOcdConfigs": [
+    "board/esp32c6-builtin.cfg"
+  ],
+  "idf.extraCleanPaths": [
+    "build/esp32c6_rgb8/CMakeCache.txt",
+    "build/esp32c6_rgb8/CMakeFiles",
+    "build/esp32c6_rgb8/esp-idf",
+    "build/esp32c6_rgb8/bootloader",
+    "build/esp32c6_rgb8/bootloader-prefix",
+    "build/esp32c6_rgb8/bt_home.elf",
+    "build/esp32c6_rgb8/bt_home.bin",
+    "build/esp32c6_rgb8/bt_home.map"
+  ],
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-18.1.2_20240912\\esp-clang\\bin\\clangd.exe",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/vscode-native-esp32c6_rgb8/compile_commands.json",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=${workspaceFolder}/build/vscode-native-esp32c6_rgb8"
+  ],
+  "idf.port": "COM10",
+  "idf.flashType": "UART"
 }

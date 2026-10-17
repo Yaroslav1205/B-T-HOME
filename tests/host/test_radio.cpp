@@ -1,5 +1,6 @@
 #include "bth/radio/radio_mode.hpp"
 #include "bth/radio/button.hpp"
+#include "bth/radio/station_retry.hpp"
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -19,6 +20,21 @@ struct FakeRadio final : bth::Module {
     bth::Status tick(std::uint64_t) noexcept override { log(".tick"); return tick_result; }
     void stop() noexcept override { log(".stop"); }
     void deinit() noexcept override { log(".deinit"); }
+};
+struct ModeStore : bth::RadioModeStore {
+    bth::RadioSelection mode = bth::RadioSelection::zigbee;
+    bth::Status load_result = bth::Status::ok, save_result = bth::Status::ok;
+    unsigned writes = 0;
+    bth::Status load_mode(bth::RadioSelection& value) noexcept override { value = mode; return load_result; }
+    bth::Status save_mode(bth::RadioSelection value) noexcept override {
+        ++writes;
+        if (save_result == bth::Status::ok) mode = value;
+        return save_result;
+    }
+};
+struct Control : bth::WifiModeControl {
+    bool station = false;
+    void select_station(bool value) noexcept override { station = value; }
 };
 struct ButtonDriver {
     bth::BootGesture gesture;
@@ -40,7 +56,8 @@ void test_radio() {
     using bth::Status;
     std::vector<std::string> calls;
     FakeRadio zigbee("zb", calls), wifi("wifi", calls), web("web", calls);
-    bth::RadioMode radio(zigbee, wifi, web);
+    ModeStore store; Control control;
+    bth::RadioMode radio(zigbee, wifi, web, control, store);
     CHECK_R(radio.toggle() == Status::invalid_state);
     CHECK_R(radio.init() == Status::ok && radio.start() == Status::ok);
     CHECK_R(!radio.configuration_mode());
@@ -52,6 +69,9 @@ void test_radio() {
     CHECK_R(radio.tick(1) == Status::ok);
     CHECK_R((calls == std::vector<std::string>{"wifi.tick", "web.tick"}));
     calls.clear();
+    CHECK_R(radio.toggle() == Status::ok && radio.configuration_mode() && control.station);
+    CHECK_R(store.mode == bth::RadioSelection::station);
+    calls.clear();
     CHECK_R(radio.toggle() == Status::ok && !radio.configuration_mode());
     CHECK_R((calls == std::vector<std::string>{"web.stop", "wifi.stop", "web.deinit", "wifi.deinit", "zb.init", "zb.start"}));
     zigbee.tick_result = Status::hardware_error;
@@ -61,7 +81,8 @@ void test_radio() {
     for (unsigned failure = 0; failure < 6; ++failure) {
         zigbee.init_result = zigbee.start_result = wifi.init_result = wifi.start_result =
             web.init_result = web.start_result = Status::ok;
-        bth::RadioMode failing(zigbee, wifi, web);
+        ModeStore failure_store;
+        bth::RadioMode failing(zigbee, wifi, web, control, failure_store);
         if (failure < 2) {
             (failure == 0 ? zigbee.init_result : zigbee.start_result) = Status::hardware_error;
             const auto result = failing.init();
@@ -80,6 +101,40 @@ void test_radio() {
         }
         calls.clear(); failing.stop(); failing.deinit(); CHECK_R(calls.empty());
     }
+    zigbee.init_result = zigbee.start_result = zigbee.tick_result = wifi.init_result =
+        wifi.start_result = web.init_result = web.start_result = Status::ok;
+    store.mode = bth::RadioSelection::station;
+    {
+        bth::RadioMode restored(zigbee, wifi, web, control, store);
+        CHECK_R(restored.init() == Status::ok && restored.start() == Status::ok);
+        CHECK_R(control.station && restored.selection() == bth::RadioSelection::station);
+        store.save_result = Status::hardware_error;
+        CHECK_R(restored.toggle() == Status::hardware_error);
+        CHECK_R(store.mode == bth::RadioSelection::station);
+        calls.clear(); restored.deinit(); CHECK_R(calls.empty());
+    }
+    for (bool invalid : {false, true}) {
+        store.load_result = invalid ? Status::ok : Status::hardware_error;
+        store.mode = static_cast<bth::RadioSelection>(99);
+        bth::RadioMode broken(zigbee, wifi, web, control, store);
+        CHECK_R(broken.init() == (invalid ? Status::invalid_argument : Status::hardware_error));
+        calls.clear(); broken.deinit(); CHECK_R(calls.empty());
+    }
+    bth::StationRetry retry;
+    retry.reset(true, true);
+    const auto base = 1ULL << 33;
+    CHECK_R(retry.poll(base, false) == 0);
+    CHECK_R(retry.poll(base + 14999, false) == -1);
+    CHECK_R(retry.poll(base + 15000, false) == 1);
+    CHECK_R(retry.poll(base + 30000, false) == 0);
+    CHECK_R(retry.poll(base + 30001, true) == -1);
+    CHECK_R(retry.poll(base + 999999, true) == -1);
+    CHECK_R(retry.poll(base + 1000000, false) == 1);
+    CHECK_R(retry.poll(0, false) == 0);
+    retry.reset(false, true);
+    CHECK_R(retry.poll(0, false) == 1 && retry.poll(15000, false) == 1);
+    retry.reset(false, false);
+    CHECK_R(retry.poll(0, false) == -1 && retry.poll(15000, false) == -1);
     ButtonDriver button;
     CHECK_R(button.sample(false) == bth::ButtonAction::none);
     CHECK_R(button.press(100) == bth::ButtonAction::pair);

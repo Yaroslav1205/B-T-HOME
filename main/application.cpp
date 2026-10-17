@@ -1,4 +1,6 @@
 #include "application.hpp"
+#include "bth/platform/esp_buzzer.hpp"
+#include "bth/platform/buzzer_settings.hpp"
 #include "bth/platform/esp_mains.hpp"
 #include "bth/platform/battery_store.hpp"
 
@@ -8,6 +10,7 @@
 #include "bth/heartbeat/heartbeat.hpp"
 #include "bth/platform/esp_heartbeat_sink.hpp"
 #include "bth/platform/esp_rgb_led.hpp"
+#include "bth/platform/esp_gpio_led.hpp"
 #include "bth/platform/esp_oled_i2c.hpp"
 #include "bth/startup_blink/startup_blink.hpp"
 #include "bth/platform/nvs_storage.hpp"
@@ -36,21 +39,29 @@ namespace bth::app {
 namespace {
 constexpr const char* tag = "app";
 // Keep ADC diagnostics available for sensor calibration and wiring checks.
-constexpr bool voltage_console_enabled = true;
+constexpr bool voltage_console_enabled = false;
 static_assert(CONFIG_ESP_MAIN_TASK_STACK_SIZE >= 8192,
               "B-T HOME requires at least 8192 bytes of main task stack. "
               "Update CONFIG_ESP_MAIN_TASK_STACK_SIZE in the existing sdkconfig; defaults do not override it.");
+// One tick drains at most 256 ADC results: 64 ms at 4 kHz for AC + DC.
+// Leave scheduling headroom and keep BOOT debounce/startup indication responsive.
+static_assert((board::mains_adc_gpio < 0 && board::boot_button_gpio < 0 && board::led_gpio < 0) ||
+              CONFIG_BTH_LOOP_INTERVAL_MS <= 50,
+              "Boards with ADC, BOOT or startup LED require BTH_LOOP_INTERVAL_MS <= 50. "
+              "Update the existing sdkconfig through menuconfig.");
 
 class MainsOutputs final : public MainsSink {
 public:
-    MainsOutputs(MainsSink& log, MainsSink& display, MainsSink* web, MainsSink* matter, MainsSink* battery)
-        : log_(log), display_(display), web_(web), matter_(matter), battery_(battery) {}
+    MainsOutputs(MainsSink& log, MainsSink& display, MainsSink* web, MainsSink* matter,
+                 MainsSink* battery, MainsSink* buzzer)
+        : log_(log), display_(display), web_(web), matter_(matter), battery_(battery), buzzer_(buzzer) {}
     void report(const MainsReading& reading) noexcept override {
         if (voltage_console_enabled) log_.report(reading);
         display_.report(reading);
         if (web_) web_->report(reading);
         if (matter_) matter_->report(reading);
         if (battery_) battery_->report(reading);
+        if (buzzer_) buzzer_->report(reading);
     }
 private:
     MainsSink& log_;
@@ -58,6 +69,7 @@ private:
     MainsSink* web_;
     MainsSink* matter_;
     MainsSink* battery_;
+    MainsSink* buzzer_;
 };
 
 class DcOutput final : public DcSink {
@@ -115,7 +127,11 @@ void run() {
     EspHeartbeatSink heartbeat_sink;
     Heartbeat heartbeat(heartbeat_sink, CONFIG_BTH_HEARTBEAT_INTERVAL_MS);
 #endif
-    EspRgbLed startup_led(board::rgb_led_gpio);
+#if BTH_LED_VARIANT == BTH_LED_VARIANT_GPIO
+    EspGpioLed startup_led(board::led_gpio, board::led_active_high);
+#else
+    EspRgbLed startup_led(board::led_gpio);
+#endif
     StartupBlinkConfig blink_config{
         CONFIG_BTH_STARTUP_BLINK_COUNT,
         CONFIG_BTH_STARTUP_BLINK_ON_MS,
@@ -126,7 +142,7 @@ void run() {
     blink_config.repeat_pause_ms = CONFIG_BTH_STARTUP_BLINK_REPEAT_PAUSE_MS;
 #if CONFIG_BTH_WEB_RELAY_ENABLED
 #if CONFIG_BTH_ZIGBEE_ENABLED
-    blink_config.count = 2;
+    blink_config.count = 1;
 #else
     blink_config.count = 1;
 #endif
@@ -136,6 +152,8 @@ void run() {
     StartupBlinkModule startup_blink(startup_led, blink_config);
 #if CONFIG_BTH_WEB_RELAY_ENABLED
     NvsStorage storage;
+    NvsBuzzerSettings buzzer_settings;
+    BuzzerSettings* web_buzzer = board::buzzer_gpio >= 0 ? &buzzer_settings : nullptr;
     NvsRelayStore relay_store;
     EspRelay relay_output(board::relay_gpio, board::relay_active_high);
     RelayController relay_controller(relay_output, relay_store);
@@ -152,7 +170,7 @@ void run() {
     static_assert(board::relay_gpio >= 0 && board::boot_button_gpio >= 0, "Matter requires relay and BOOT GPIOs");
     MatterModule matter(relay_service);
     MatterVoltageOutputs matter_voltages(matter);
-    RelayWeb web(relay_service, access);
+    RelayWeb web(relay_service, access, web_buzzer);
     BootButton boot_button(board::boot_button_gpio, board::boot_button_active_low);
 #elif CONFIG_BTH_ZIGBEE_ENABLED
     WifiAp wifi(access);
@@ -160,12 +178,12 @@ void run() {
     static_assert(board::boot_button_gpio >= 0, "Zigbee/Wi-Fi mode selection requires a confirmed BOOT GPIO");
     ZigbeeModule zigbee(relay_service);
     // The configuration AP never shares the radio with Zigbee.
-    RelayWeb web(relay_service, access, wifi);
-    RadioMode radio(zigbee, wifi, web);
+    RelayWeb web(relay_service, access, wifi, nullptr, web_buzzer);
+    RadioMode radio(zigbee, wifi, web, wifi, access_store);
     BootButton boot_button(board::boot_button_gpio, board::boot_button_active_low);
 #else
     WifiAp wifi(access);
-    RelayWeb web(relay_service, access, wifi);
+    RelayWeb web(relay_service, access, wifi, nullptr, web_buzzer);
 #endif
     MainsSink* web_mains = &web;
     DcSink* web_dc = &web;
@@ -190,7 +208,7 @@ void run() {
     OledModule oled(oled_bus, board::oled_contrast, board::dc_adc_gpio >= 0 ? 2 : 1,
                     blink_config.startup_ms, board::mains_adc_gpio >= 0,
                     board::mains_adc_gpio >= 0, show_relay,
-#if CONFIG_BTH_MATTER_ENABLED
+#if CONFIG_BTH_MATTER_ENABLED || CONFIG_BTH_ZIGBEE_ENABLED
                     true
 #else
                     false
@@ -199,7 +217,7 @@ void run() {
 #if CONFIG_BTH_WEB_RELAY_ENABLED
     NvsBatteryStore battery_store;
     static constexpr const char* battery_providers[] = {"nvs", "mains", "dc"};
-    BatteryModule battery(battery_store, oled, {12000, 100, 1500, 10.0}, {battery_providers, 3});
+    BatteryModule battery(battery_store, oled, {12000, 58000, 1500, 10.5}, {battery_providers, 3});
     constexpr bool battery_enabled = board::mains_adc_gpio >= 0 && board::dc_adc_gpio >= 0;
     MainsSink* battery_mains = battery_enabled ? &battery : nullptr;
     DcSink* battery_dc = battery_enabled ? &battery : nullptr;
@@ -209,14 +227,22 @@ void run() {
 #endif
     EspMainsInput mains_input(board::mains_adc_gpio, board::dc_adc_gpio);
     EspMainsSink mains_sink;
-    MainsOutputs mains_outputs(mains_sink, oled, web_mains, matter_mains, battery_mains);
+    EspBuzzer buzzer_output(board::buzzer_gpio, board::buzzer_active_high);
+    BuzzerModule buzzer(buzzer_output);
+    MainsOutputs mains_outputs(mains_sink, oled, web_mains, matter_mains, battery_mains,
+                               board::buzzer_gpio >= 0 ? &buzzer : nullptr);
     MainsModule mains(mains_input, mains_outputs, CONFIG_BTH_MAINS_MILLIVOLTS_PER_COUNT / 1000.0);
     DcOutput dc_output(oled, web_dc, matter_dc, battery_dc);
     static constexpr const char* adc_provider[] = {"mains"};
-    DcModule dc(mains_input, dc_output, board::dc_divider_ratio, {adc_provider, 1});
+    DcModule dc(mains_input, dc_output,
+                board::dc_divider_ratio * CONFIG_BTH_DC_CALIBRATION_PERMILLE / 1000.0,
+                {adc_provider, 1});
     Runtime runtime;
 #if CONFIG_BTH_WEB_RELAY_ENABLED
     if (runtime.add(storage) != Status::ok) { log_failure(runtime); return; }
+    if constexpr (board::buzzer_gpio >= 0) {
+        if (runtime.add(buzzer_settings) != Status::ok) { log_failure(runtime); return; }
+    }
 #endif
     if constexpr (board::mains_adc_gpio >= 0) {
         if (runtime.add(mains) != Status::ok) {
@@ -229,6 +255,9 @@ void run() {
             log_failure(runtime);
             return;
         }
+    }
+    if constexpr (board::buzzer_gpio >= 0) {
+        if (runtime.add(buzzer) != Status::ok) { log_failure(runtime); return; }
     }
 #if CONFIG_BTH_WEB_RELAY_ENABLED
     if constexpr (battery_enabled) {
@@ -259,7 +288,7 @@ void run() {
         }
     }
 #endif
-    if constexpr (board::rgb_led_gpio >= 0) {
+    if constexpr (board::led_gpio >= 0) {
         if (runtime.add(startup_blink) != Status::ok) {
             log_failure(runtime);
             return;
@@ -279,7 +308,7 @@ void run() {
 #if CONFIG_BTH_MATTER_ENABLED
     ESP_LOGI(tag, "Mode: Matter Wi-Fi | BOOT: short=pair, hold 3s and release=reset Matter and Wi-Fi, reboot and pair");
 #elif CONFIG_BTH_ZIGBEE_ENABLED
-    ESP_LOGI(tag, "Mode: Zigbee | BOOT: short=pair, hold 3s and release=Wi-Fi configuration");
+    ESP_LOGI(tag, "BOOT: short=AP/STA/Zigbee, hold 3s and release=Zigbee pairing");
 #endif
 
     const TickType_t delay_ticks = pdMS_TO_TICKS(CONFIG_BTH_LOOP_INTERVAL_MS);
@@ -289,6 +318,13 @@ void run() {
     for (;;) {
         const auto now_ms = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
 #if CONFIG_BTH_WEB_RELAY_ENABLED
+        if constexpr (board::buzzer_gpio >= 0) {
+            if (buzzer.set_interval_seconds(buzzer_settings.interval_seconds()) != Status::ok) {
+                ESP_LOGE(tag, "Invalid buzzer interval");
+                runtime.stop();
+                return;
+            }
+        }
         const auto relay_state = relay_service.snapshot();
         oled.report_relay(relay_state.on, relay_state.ready && relay_state.output_known);
 #endif
@@ -299,8 +335,10 @@ void run() {
         }
         startup_blink.set_count(matter.pairing() ? 3 : 1);
 #elif CONFIG_BTH_ZIGBEE_ENABLED
-        startup_blink.set_count(radio.configuration_mode() ? 1 :
-            zigbee.snapshot().state == ZigbeeState::joining ? 3 : 2);
+        oled.report_ipv4(radio.configuration_mode() ? wifi.ipv4_address() : std::array<std::uint8_t, 4>{});
+        startup_blink.set_count(radio.selection() == RadioSelection::ap ? 1 :
+            radio.selection() == RadioSelection::station ? 2 :
+            zigbee.snapshot().state == ZigbeeState::joining ? 8 : 3);
 #endif
         if (runtime.tick(now_ms) != Status::ok) {
             log_failure(runtime);
@@ -327,7 +365,7 @@ void run() {
         matter.service_pairing();
 #elif CONFIG_BTH_ZIGBEE_ENABLED
         const auto action = boot_button.take_action();
-        if (action == ButtonAction::toggle_mode) {
+        if (action == ButtonAction::pair) {
             // Joins radio workers outside tick; providers and measurements stay alive.
             const auto result = radio.toggle();
             if (result != Status::ok) {
@@ -335,8 +373,9 @@ void run() {
                 runtime.stop();
                 return;
             }
-            ESP_LOGI(tag, "Mode: %s", radio.configuration_mode() ? "Wi-Fi configuration | http://192.168.4.1" : "Zigbee");
-        } else if (action == ButtonAction::pair && !radio.configuration_mode()) {
+            ESP_LOGI(tag, "Mode: %s", radio.selection() == RadioSelection::ap ? "Wi-Fi AP | http://192.168.4.1" :
+                radio.selection() == RadioSelection::station ? "Wi-Fi client" : "Zigbee");
+        } else if (action == ButtonAction::toggle_mode && !radio.configuration_mode()) {
             ESP_LOGI(tag, "BOOT pairing: %s", zigbee.request(ZigbeeCommand::join) ? "queued" : "busy");
         }
 #endif

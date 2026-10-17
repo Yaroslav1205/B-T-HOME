@@ -2,12 +2,12 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "B-T HOME: Build, Flash and Monitor (Matter Wi-Fi)",
+      "label": "B-T HOME: Build, Flash and Monitor (Zigbee + Wi-Fi AP)",
       "dependsOrder": "sequence",
       "dependsOn": [
-        "B-T HOME: build Matter Wi-Fi",
-        "B-T HOME: flash Matter Wi-Fi",
-        "B-T HOME: monitor Matter Wi-Fi"
+        "B-T HOME: build Zigbee + Wi-Fi AP",
+        "B-T HOME: flash Zigbee + Wi-Fi AP",
+        "B-T HOME: monitor Zigbee + Wi-Fi AP"
       ],
       "group": {
         "kind": "build",
@@ -16,7 +16,7 @@
       "problemMatcher": []
     },
     {
-      "label": "B-T HOME: build Matter Wi-Fi",
+      "label": "B-T HOME: build Zigbee + Wi-Fi AP",
       "type": "process",
       "command": "powershell",
       "args": [
@@ -24,7 +24,7 @@
         "-ExecutionPolicy",
         "Bypass",
         "-File",
-        "${workspaceFolder}/scripts/matter.ps1",
+        "${workspaceFolder}/scripts/idf.ps1",
         "-Action",
         "build"
       ],
@@ -37,42 +37,13 @@
         "panel": "dedicated",
         "clear": true
       },
-      "runOptions": { "instanceLimit": 1 },
+      "runOptions": {
+        "instanceLimit": 1
+      },
       "problemMatcher": "$gcc"
     },
     {
-      "label": "B-T HOME: flash Matter Wi-Fi",
-      "type": "process",
-      "command": "powershell",
-      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-        "${workspaceFolder}/scripts/matter.ps1", "-Action", "flash", "-Port", "${input:matterPort}"],
-      "problemMatcher": []
-    },
-    {
-      "label": "B-T HOME: monitor Matter Wi-Fi",
-      "type": "process",
-      "command": "powershell",
-      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-        "${workspaceFolder}/scripts/matter.ps1", "-Action", "monitor", "-Port", "${input:matterPort}"],
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "focus": true,
-        "panel": "dedicated"
-      }
-    },
-    {
-      "label": "B-T HOME: menuconfig Matter Wi-Fi",
-      "detail": "Runs Matter menuconfig in WSL. Do not use the ESP-IDF extension's native confserver for the Windows bridge.",
-      "type": "process",
-      "command": "powershell",
-      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-        "${workspaceFolder}/scripts/matter.ps1", "-Action", "menuconfig"],
-      "problemMatcher": [],
-      "presentation": { "reveal": "always", "focus": true, "panel": "dedicated" }
-    },
-    {
-      "label": "B-T HOME: menuconfig legacy Wi-Fi AP",
+      "label": "B-T HOME: flash Zigbee + Wi-Fi AP",
       "type": "process",
       "command": "powershell",
       "args": [
@@ -82,8 +53,47 @@
         "-File",
         "${workspaceFolder}/scripts/idf.ps1",
         "-Action",
-        "menuconfig",
-        "-WifiAp"
+        "flash",
+        "-Port",
+        "${config:idf.port}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "B-T HOME: monitor Zigbee + Wi-Fi AP",
+      "type": "process",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/idf.ps1",
+        "-Action",
+        "monitor",
+        "-Port",
+        "${config:idf.port}"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "focus": true,
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "B-T HOME: menuconfig Zigbee + Wi-Fi AP",
+      "detail": "Налаштування Zigbee та Wi-Fi AP через ESP-IDF у Windows.",
+      "type": "process",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/idf.ps1",
+        "-Action",
+        "menuconfig"
       ],
       "problemMatcher": [],
       "presentation": {
@@ -109,6 +119,5 @@
       },
       "problemMatcher": "$msCompile"
     }
-  ],
-  "inputs": [{"id": "matterPort", "type": "promptString", "description": "USB serial port", "default": "COM11"}]
+  ]
 }

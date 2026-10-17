@@ -345,10 +345,12 @@ void heartbeat_rejects_invalid_configuration_and_state() {
 }
 
 void test_startup_blink();
+void test_gpio_led();
 void test_relay();
 void test_access();
 void test_dc();
 void test_web_voltage();
+void test_web_request();
 void test_zigbee();
 void test_relay_service();
 void test_zigbee_storage();
@@ -357,13 +359,16 @@ void test_matter();
 void test_oled();
 void test_mains();
 void test_battery();
+void test_buzzer();
 
 int main() {
     const struct { const char* name; void (*run)(); } tests[] = {
         {"mains RMS and lifecycle", test_mains},
         {"DC voltage", test_dc},
         {"Battery estimate and persistence", test_battery},
+        {"Buzzer outage timing and rollback", test_buzzer},
         {"Web voltage freshness", test_web_voltage},
+        {"Web request bounds", test_web_request},
         {"Zigbee pairing window", test_zigbee},
         {"Relay concurrent producers", test_relay_service},
         {"Zigbee NVS initialization", test_zigbee_storage},
@@ -373,6 +378,7 @@ int main() {
         {"access settings", test_access},
         {"relay persistence and failures", test_relay},
         {"startup blink", test_startup_blink},
+        {"GPIO LED polarity and cleanup", test_gpio_led},
         {"successful lifecycle", successful_lifecycle},
         {"init rollback", init_failure_cleans_partial_module},
         {"start rollback", start_failure_stops_partial_module},

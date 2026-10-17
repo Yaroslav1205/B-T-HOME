@@ -47,7 +47,9 @@ void test_startup_blink() {
         CHECK_BLINK(runtime.tick(50) == Status::ok && !led.on);
         CHECK_BLINK(runtime.tick(2000) == Status::ok && !led.on);
         std::uint64_t now = 4000;
-        for (auto count : {3U, 1U, 2U, 3U}) {
+        for (auto count : {3U, 1U, 2U, 3U, 8U}) {
+            blink.set_count(count);
+            if (count == 8) { CHECK_BLINK(runtime.tick(now) == Status::ok && !led.on); now += 2000; }
             const auto edges = led.edges.size();
             for (unsigned pulse = 0; pulse < count; ++pulse) {
                 blink.set_count(count); // Repeated status updates must not restart a group.

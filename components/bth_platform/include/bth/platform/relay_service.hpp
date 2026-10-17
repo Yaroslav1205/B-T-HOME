@@ -31,6 +31,8 @@ private:
     static void worker(void* context);
     RelayController& controller_;
     const bool configured_;
+    bool initialized_ = false;
+    bool running_ = false;
     QueueHandle_t commands_ = nullptr;
     QueueHandle_t replies_ = nullptr;
     QueueHandle_t states_ = nullptr;

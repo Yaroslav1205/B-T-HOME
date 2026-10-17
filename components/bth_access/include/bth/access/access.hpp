@@ -12,11 +12,13 @@ struct WebCredentials {
     std::array<unsigned char, 32> hash{};
 };
 struct AccessConfig {
-    std::uint32_t version = 1;
+    std::uint32_t version = 2;
     WifiSettings wifi{};
     WebCredentials web{};
+    std::array<WifiSettings, 2> stations{};
 };
 bool valid_wifi(const WifiSettings& wifi) noexcept;
+bool valid_station(const WifiSettings& wifi) noexcept;
 bool valid_username(const char* value) noexcept;
 bool valid_web_password(const char* value) noexcept;
 bool same_wifi(const WifiSettings& a, const WifiSettings& b) noexcept;
@@ -53,7 +55,8 @@ public:
     const AccessConfig& config() const noexcept { return config_; }
     bool authenticate(const char* username, const char* password) noexcept;
     Status update(const WifiSettings& wifi, const char* username,
-                  const char* new_password, bool& credentials_changed) noexcept;
+                  const char* new_password, bool& credentials_changed,
+                  const std::array<WifiSettings, 2>* stations = nullptr) noexcept;
 private:
     inline static constexpr const char* required_[] = {"nvs"};
     AccessStore& store_;

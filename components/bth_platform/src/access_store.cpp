@@ -23,19 +23,47 @@ Status NvsAccessStore::init() noexcept {
 }
 Status NvsAccessStore::load(AccessConfig& config, bool& found) noexcept {
     static_assert(std::is_trivially_copyable_v<AccessConfig>);
-    static_assert(sizeof(AccessConfig) == 184, "Update settings schema when layout changes");
+    static_assert(sizeof(AccessConfig) == 376, "Update settings schema when layout changes");
     std::size_t length = sizeof(config);
-    const auto result = nvs_get_blob(handle_, "config_v1", &config, &length);
+    auto result = nvs_get_blob(handle_, "config_v2", &config, &length);
+    if (result != ESP_ERR_NVS_NOT_FOUND) {
+        found = true;
+        if (result != ESP_OK) return check(result);
+        return length == sizeof(config) ? Status::ok : Status::invalid_argument;
+    }
+    struct Legacy { std::uint32_t version; WifiSettings wifi; WebCredentials web; } legacy{};
+    static_assert(sizeof(Legacy) == 184);
+    length = sizeof(legacy);
+    result = nvs_get_blob(handle_, "config_v1", &legacy, &length);
     found = result != ESP_ERR_NVS_NOT_FOUND;
-    if (!found) { return Status::ok; }
-    if (result != ESP_OK) { return check(result); }
-    return length == sizeof(config) ? Status::ok : Status::invalid_argument;
+    if (!found) return Status::ok;
+    if (result != ESP_OK) return check(result);
+    if (length != sizeof(legacy) || legacy.version != 1 ||
+        !valid_wifi(legacy.wifi) || !valid_username(legacy.web.username)) return Status::invalid_argument;
+    config = {};
+    config.wifi = legacy.wifi;
+    config.web = legacy.web;
+    return save(config);
 }
 Status NvsAccessStore::save(const AccessConfig& config) noexcept {
-    auto result = nvs_set_blob(handle_, "config_v1", &config, sizeof(config));
-    if (result == ESP_OK) { result = nvs_commit(handle_); }
+    auto result = nvs_set_blob(handle_, "config_v2", &config, sizeof(config));
+    if (result == ESP_OK) result = nvs_commit(handle_);
     return check(result);
 }
+Status NvsAccessStore::load_mode(RadioSelection& mode) noexcept {
+    std::uint8_t value = 1;
+    const auto result = nvs_get_u8(handle_, "radio_mode", &value);
+    if (result != ESP_OK && result != ESP_ERR_NVS_NOT_FOUND) return check(result);
+    if (value < 1 || value > 3) return Status::invalid_argument;
+    mode = static_cast<RadioSelection>(value);
+    return Status::ok;
+}
+Status NvsAccessStore::save_mode(RadioSelection mode) noexcept {
+    auto result = nvs_set_u8(handle_, "radio_mode", static_cast<std::uint8_t>(mode));
+    if (result == ESP_OK) result = nvs_commit(handle_);
+    return check(result);
+}
+
 void NvsAccessStore::deinit() noexcept {
     if (handle_) { nvs_close(handle_); handle_ = 0; }
 }

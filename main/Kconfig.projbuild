@@ -3,7 +3,7 @@ menu "B-T HOME application"
         bool "Enable relay and authenticated web control"
         default y
         help
-            Runs the relay control page over Matter Wi-Fi, or a legacy Wi-Fi AP.
+            Runs the relay control page over a Wi-Fi AP, or optional Matter Wi-Fi.
             Relay GPIO and polarity must be specified by the board profile.
     config BTH_LOOP_INTERVAL_MS
         int "Module polling interval (ms)"
@@ -12,4 +12,6 @@ menu "B-T HOME application"
         help
             All module tick callbacks run sequentially in the application task.
             Keep callbacks short; use a module-owned task for blocking I/O.
+            Boards with ADC, BOOT or startup LED require at most 50 ms;
+            application.cpp rejects slower polling for these profiles.
 endmenu

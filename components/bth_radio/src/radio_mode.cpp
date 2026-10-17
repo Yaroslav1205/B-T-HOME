@@ -3,7 +3,15 @@
 namespace bth {
 Status RadioMode::init() noexcept {
     if (initialized_ || started_) return Status::invalid_state;
-    const unsigned count = configuration_ ? 2 : 1;
+    if (!loaded_) {
+        const auto result = store_.load_mode(mode_);
+        if (result != Status::ok) return result;
+        if (mode_ != RadioSelection::ap && mode_ != RadioSelection::station && mode_ != RadioSelection::zigbee)
+            return Status::invalid_argument;
+        loaded_ = true;
+    }
+    control_.select_station(mode_ == RadioSelection::station);
+    const unsigned count = configuration_mode() ? 2 : 1;
     while (initialized_ < count) {
         const auto result = child(initialized_++).init();
         if (result != Status::ok) { deinit(); return result; }
@@ -36,7 +44,11 @@ void RadioMode::deinit() noexcept {
 Status RadioMode::toggle() noexcept {
     if (!started_) return Status::invalid_state;
     deinit();
-    configuration_ = !configuration_;
+    const auto next = mode_ == RadioSelection::ap ? RadioSelection::station :
+        mode_ == RadioSelection::station ? RadioSelection::zigbee : RadioSelection::ap;
+    const auto saved = store_.save_mode(next);
+    if (saved != Status::ok) return saved;
+    mode_ = next;
     const auto result = init();
     return result == Status::ok ? start() : result;
 }

@@ -1,6 +1,8 @@
 #include "bth/web/relay_web.hpp"
+#include "bth/web/request_body.hpp"
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 #include "cJSON.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -35,7 +37,7 @@ cJSON* read_json(httpd_req_t* request) {
     if (!mutation_header(request)) {
         error(request, "403 Forbidden", "same_origin_required"); return nullptr;
     }
-    char body[512]{};
+    char body[2048]{};
     if (request->content_len == 0 || request->content_len >= sizeof(body)) {
         error(request, "400 Bad Request", "invalid_json"); return nullptr;
     }
@@ -45,7 +47,7 @@ cJSON* read_json(httpd_req_t* request) {
         if (count <= 0) { error(request, "408 Request Timeout", "timeout"); return nullptr; }
         received += static_cast<std::size_t>(count);
     }
-    if (std::memchr(body, 0, received)) {
+    if (!valid_flat_json_body({body, received})) {
         error(request, "400 Bad Request", "invalid_json"); return nullptr;
     }
     auto* json = cJSON_ParseWithOpts(body, nullptr, true);
@@ -109,7 +111,7 @@ Status RelayWeb::start() noexcept {
     if (!voltage_queue_ || server_) return Status::invalid_state;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_uri_handlers = 10;
+    config.max_uri_handlers = 12;
     config.max_open_sockets = 4;
     config.lru_purge_enable = true;
     config.recv_wait_timeout = 3;
@@ -134,6 +136,10 @@ Status RelayWeb::start() noexcept {
     uri.uri = "/api/settings"; uri.method = HTTP_GET; uri.handler = get_settings;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
     uri.method = HTTP_PUT; uri.handler = set_settings;
+    if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
+    uri.uri = "/api/buzzer"; uri.method = HTTP_GET; uri.handler = get_buzzer;
+    if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
+    uri.method = HTTP_PUT; uri.handler = set_buzzer;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
     uri.uri = "/api/voltages"; uri.method = HTTP_GET; uri.handler = get_voltages;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
@@ -265,11 +271,12 @@ esp_err_t RelayWeb::set_state(httpd_req_t* request) {
         if (count <= 0) { return ESP_FAIL; }
         received += static_cast<std::size_t>(count);
     }
-    if (std::strcmp(body, "true") != 0 && std::strcmp(body, "false") != 0) {
+    bool on = false;
+    if (!parse_relay_command({body, received}, on)) {
         return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "expected_boolean");
     }
     RelayState state{};
-    if (!self.relay_.request(body[0] == 't', state)) {
+    if (!self.relay_.request(on, state)) {
         httpd_resp_set_status(request, "503 Service Unavailable");
         return httpd_resp_send(request, "command_pending", HTTPD_RESP_USE_STRLEN);
     }
@@ -360,7 +367,11 @@ esp_err_t RelayWeb::get_settings(httpd_req_t* request) {
     if (json) {
         cJSON_AddStringToObject(json, "ssid", config.wifi.ssid);
         cJSON_AddStringToObject(json, "username", config.web.username);
-        cJSON_AddBoolToObject(json, "wifi_pending", self.wifi_ && !same_wifi(config.wifi, self.wifi_->active()));
+        cJSON_AddStringToObject(json, "primary_ssid", config.stations[0].ssid);
+        cJSON_AddStringToObject(json, "backup_ssid", config.stations[1].ssid);
+        cJSON_AddBoolToObject(json, "primary_open", config.stations[0].ssid[0] && !config.stations[0].password[0]);
+        cJSON_AddBoolToObject(json, "backup_open", config.stations[1].ssid[0] && !config.stations[1].password[0]);
+        cJSON_AddBoolToObject(json, "wifi_pending", self.wifi_ && !self.wifi_->station_mode() && !same_wifi(config.wifi, self.wifi_->active()));
         cJSON_AddBoolToObject(json, "wifi_managed_by_matter", self.wifi_ == nullptr);
     }
     return send_json(request, json);
@@ -371,10 +382,18 @@ esp_err_t RelayWeb::set_settings(httpd_req_t* request) {
     if (self.wifi_pending_) { return error(request, "409 Conflict", "wifi_pending"); }
     auto* json = read_json(request);
     if (!json) { return ESP_OK; }
-    const char* ssid = field(json, "ssid");
-    const char* password = field(json, "wifi_password");
-    const char* username = field(json, "username");
-    const char* web_password = field(json, "web_password");
+    const bool access_fields = cJSON_HasObjectItem(json, "ssid") || cJSON_HasObjectItem(json, "wifi_password") ||
+        cJSON_HasObjectItem(json, "username") || cJSON_HasObjectItem(json, "web_password");
+    const bool router_fields = cJSON_HasObjectItem(json, "primary_ssid") || cJSON_HasObjectItem(json, "primary_password") ||
+        cJSON_HasObjectItem(json, "primary_open") || cJSON_HasObjectItem(json, "backup_ssid") ||
+        cJSON_HasObjectItem(json, "backup_password") || cJSON_HasObjectItem(json, "backup_open");
+    if (!access_fields && !router_fields) {
+        cJSON_Delete(json); return error(request, "400 Bad Request", "invalid_settings");
+    }
+    const char* ssid = access_fields ? field(json, "ssid") : self.settings_.config().wifi.ssid;
+    const char* password = access_fields ? field(json, "wifi_password") : "";
+    const char* username = access_fields ? field(json, "username") : self.settings_.config().web.username;
+    const char* web_password = access_fields ? field(json, "web_password") : "";
     if (!ssid || !password || !username || !web_password || std::strlen(ssid) > 32 || std::strlen(password) > 63) {
         cJSON_Delete(json); return error(request, "400 Bad Request", "invalid_settings");
     }
@@ -384,9 +403,32 @@ esp_err_t RelayWeb::set_settings(httpd_req_t* request) {
     if (!self.wifi_ && !same_wifi(wifi, self.settings_.config().wifi)) {
         cJSON_Delete(json); return error(request, "409 Conflict", "wifi_managed_by_matter");
     }
-    const bool wifi_changed = self.wifi_ && !same_wifi(wifi, self.wifi_->active());
+    auto stations = self.settings_.config().stations;
+    const char* names[] = {"primary_ssid", "backup_ssid"};
+    const char* passwords[] = {"primary_password", "backup_password"};
+    const char* open_fields[] = {"primary_open", "backup_open"};
+    for (unsigned i = 0; i < 2; ++i) {
+        const auto* name = field(json, names[i]);
+        const auto* secret = field(json, passwords[i]);
+        const auto* open = cJSON_GetObjectItemCaseSensitive(json, open_fields[i]);
+        // Omitted fields preserve settings for existing API clients.
+        if (!cJSON_HasObjectItem(json, names[i]) && !cJSON_HasObjectItem(json, passwords[i]) && !open) continue;
+        if (!self.wifi_ || !name || !secret || std::strlen(name) > 32 || std::strlen(secret) > 63 ||
+            !cJSON_IsBool(open)) {
+            cJSON_Delete(json); return error(request, "400 Bad Request", "invalid_settings");
+        }
+        const bool renamed = std::strcmp(stations[i].ssid, name) != 0;
+        if (renamed) stations[i] = {};
+        std::strcpy(stations[i].ssid, name);
+        if (!name[0] || cJSON_IsTrue(open)) stations[i].password[0] = 0;
+        else if (secret[0]) std::strcpy(stations[i].password, secret);
+        else if (!stations[i].password[0]) {
+            cJSON_Delete(json); return error(request, "400 Bad Request", "invalid_settings");
+        }
+    }
+    const bool wifi_changed = access_fields && self.wifi_ && !self.wifi_->station_mode() && !same_wifi(wifi, self.wifi_->active());
     bool credentials_changed = false;
-    const auto result = self.settings_.update(wifi, username, web_password, credentials_changed);
+    const auto result = self.settings_.update(wifi, username, web_password, credentials_changed, &stations);
     cJSON_Delete(json);
     if (result != Status::ok) {
         if (result == Status::invalid_argument) { return error(request, "400 Bad Request", "invalid_settings"); }
@@ -409,6 +451,36 @@ esp_err_t RelayWeb::set_settings(httpd_req_t* request) {
         cJSON_AddStringToObject(response, "ssid", wifi.ssid);
     }
     return send_json(request, response);
+}
+esp_err_t RelayWeb::get_buzzer(httpd_req_t* request) {
+    auto& self = *static_cast<RelayWeb*>(request->user_ctx);
+    if (!self.authorized(request)) return ESP_OK;
+    auto* json = cJSON_CreateObject();
+    if (json) {
+        cJSON_AddBoolToObject(json, "available", self.buzzer_ != nullptr);
+        if (self.buzzer_) cJSON_AddNumberToObject(json, "interval_seconds", self.buzzer_->interval_seconds());
+    }
+    return send_json(request, json);
+}
+esp_err_t RelayWeb::set_buzzer(httpd_req_t* request) {
+    auto& self = *static_cast<RelayWeb*>(request->user_ctx);
+    if (!self.authorized(request)) return ESP_OK;
+    if (!self.buzzer_) return error(request, "404 Not Found", "buzzer_unavailable");
+    auto* json = read_json(request);
+    if (!json) return ESP_OK;
+    const auto* value = cJSON_GetObjectItemCaseSensitive(json, "interval_seconds");
+    const bool valid = cJSON_IsNumber(value) && std::isfinite(value->valuedouble) &&
+        value->valuedouble >= 0 && value->valuedouble <= buzzer_max_interval_seconds &&
+        std::floor(value->valuedouble) == value->valuedouble;
+    if (!valid) {
+        cJSON_Delete(json);
+        return error(request, "400 Bad Request", "invalid_interval");
+    }
+    const auto seconds = static_cast<std::uint32_t>(value->valuedouble);
+    cJSON_Delete(json);
+    const auto result = self.buzzer_->update_interval(seconds);
+    if (result != Status::ok) return error(request, "503 Service Unavailable", "save_failed");
+    return get_buzzer(request);
 }
 void RelayWeb::apply_wifi(void* context) {
     auto& self = *static_cast<RelayWeb*>(context);

@@ -1,26 +1,35 @@
 #include "bth/platform/relay_service.hpp"
 namespace bth {
 Status RelayService::init() noexcept {
+    if (commands_ || replies_ || states_ || joined_) return Status::invalid_state;
     pending_ = 0;
     commands_ = xQueueCreate(4, sizeof(Command));
     replies_ = xQueueCreate(4, sizeof(Reply));
     states_ = xQueueCreate(1, sizeof(RelayState));
     joined_ = xSemaphoreCreateBinary();
     if (!commands_ || !replies_ || !states_ || !joined_) { return Status::no_memory; }
-    if (configured_) { return controller_.init(); }
+    if (configured_) {
+        const auto result = controller_.init();
+        initialized_ = result == Status::ok;
+        return result;
+    }
     const RelayState unavailable{};
     xQueueOverwrite(states_, &unavailable);
+    initialized_ = true;
     return Status::ok;
 }
 Status RelayService::start() noexcept {
-    if (!configured_) { return Status::ok; }
+    if (!initialized_ || running_) return Status::invalid_state;
+    if (!configured_) { running_ = true; return Status::ok; }
     const auto result = controller_.start();
     if (result != Status::ok) { return result; }
-    const auto state = controller_.state();
-    xQueueOverwrite(states_, &state);
     if (xTaskCreate(worker, "relay", 4096, this, 4, &task_) != pdPASS) {
         return Status::no_memory;
     }
+    // Publish readiness only after a worker exists to consume commands.
+    const auto state = controller_.state();
+    xQueueOverwrite(states_, &state);
+    running_ = true;
     return Status::ok;
 }
 void RelayService::worker(void* context) {
@@ -78,6 +87,11 @@ void RelayService::stop() noexcept {
         task_ = nullptr;
     }
     controller_.stop();
+    running_ = false;
+    if (states_) {
+        const auto state = configured_ ? controller_.state() : RelayState{};
+        xQueueOverwrite(states_, &state);
+    }
 }
 void RelayService::deinit() noexcept {
     stop();
@@ -86,5 +100,6 @@ void RelayService::deinit() noexcept {
     if (replies_) { vQueueDelete(replies_); replies_ = nullptr; }
     if (states_) { vQueueDelete(states_); states_ = nullptr; }
     if (joined_) { vSemaphoreDelete(joined_); joined_ = nullptr; }
+    initialized_ = false;
 }
 }  // namespace bth

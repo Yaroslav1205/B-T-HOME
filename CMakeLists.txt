@@ -1,6 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 
 # Both the extension and idf.py reconfigure from the workspace root.
+option(BTH_WINDOWS_NATIVE_BRIDGE "Delegate Windows IDE builds to the native wrapper"
+    "$ENV{BTH_WINDOWS_NATIVE_BRIDGE}")
+if(WIN32 AND BTH_WINDOWS_NATIVE_BRIDGE)
+    include(scripts/vscode-native/CMakeLists.txt)
+    return()
+endif()
+
 option(BTH_WINDOWS_MATTER_BRIDGE "Delegate Windows Matter builds to WSL"
     "$ENV{BTH_WINDOWS_MATTER_BRIDGE}")
 if(WIN32 AND BTH_WINDOWS_MATTER_BRIDGE)
@@ -16,11 +23,7 @@ set(SDKCONFIG "${CMAKE_BINARY_DIR}/sdkconfig" CACHE FILEPATH "Local SDK configur
 set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults;${BTH_BOARD_DIR}/sdkconfig.defaults")
 set(COMPONENTS main)
 set(PROJECT_VER "0.1.0")
-set(BTH_MATTER_DEFAULT OFF)
-if(BTH_BOARD STREQUAL "esp32c6_rgb8")
-    set(BTH_MATTER_DEFAULT ON)
-endif()
-option(BTH_WITH_MATTER "Build Matter over Wi-Fi using ESP-Matter SDK" ${BTH_MATTER_DEFAULT})
+option(BTH_WITH_MATTER "Build Matter over Wi-Fi using ESP-Matter SDK" OFF)
 if(BTH_WITH_MATTER)
     if(WIN32 OR NOT DEFINED ENV{ESP_MATTER_PATH})
         message(FATAL_ERROR "Matter requires Linux/WSL and ESP_MATTER_PATH. See docs/MATTER.md")

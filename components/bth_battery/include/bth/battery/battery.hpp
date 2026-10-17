@@ -26,9 +26,9 @@ public:
 };
 struct BatteryConfig {
     std::uint32_t capacity_mah = 12000;
-    std::uint32_t discharge_ma = 100;
+    std::uint32_t discharge_ua = 58000;
     std::uint32_t charge_ma = 1500;
-    double cutoff_volts = 10.0;
+    double cutoff_volts = 10.5;
 };
 class BatteryModule final : public Module, public MainsSink, public DcSink {
 public:
@@ -54,6 +54,8 @@ private:
     BatterySink& sink_;
     const BatteryConfig config_;
     const Dependencies required_;
+    // Internal microamp-milliseconds retain sub-milliamp current at short ticks.
+    // BatteryStore keeps the existing milliamp-millisecond representation.
     std::uint64_t charge_ = 0, saved_charge_ = 0;
     std::uint64_t last_tick_ = 0, last_save_ = 0, mains_at_ = 0, dc_at_ = 0;
     bool acquired_ = false, initialized_ = false, running_ = false;

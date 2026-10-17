@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "gdbtarget",
+      "request": "attach",
+      "name": "B-T HOME: ESP32-C6 USB JTAG",
+      "program": "${workspaceFolder}/build/vscode-native-esp32c6_rgb8/bt_home.elf",
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "B-T HOME: build Zigbee + Wi-Fi AP",
+      "buildFlashMonitor": false,
+      "initCommands": [
+        "set substitute-path R:/ \"${workspaceFolder}/\""
+      ]
+    }
+  ]
+}

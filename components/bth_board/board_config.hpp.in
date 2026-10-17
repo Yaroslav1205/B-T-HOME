@@ -1,10 +1,35 @@
 #pragma once
 
+#define BTH_LED_VARIANT_RGB 0
+#define BTH_LED_VARIANT_GPIO 1
+#cmakedefine BTH_BOARD_HAS_LED_CONFIG
+#ifdef BTH_BOARD_HAS_LED_CONFIG
+#include "bth/board/led_config.hpp"
+#endif
+#ifndef BTH_LED_VARIANT
+#define BTH_LED_VARIANT BTH_LED_VARIANT_RGB
+#endif
+#if BTH_LED_VARIANT != BTH_LED_VARIANT_RGB && BTH_LED_VARIANT != BTH_LED_VARIANT_GPIO
+#error "BTH_LED_VARIANT must select RGB or GPIO"
+#endif
+
 namespace bth::board {
 inline constexpr const char* id = "@BTH_BOARD@";
 inline constexpr const char* target = "@BTH_BOARD_TARGET@";
 inline constexpr const char* name = R"board(@BTH_BOARD_NAME@)board";
 inline constexpr int rgb_led_gpio = @BTH_RGB_LED_GPIO@;
+#if BTH_LED_VARIANT == BTH_LED_VARIANT_GPIO
+#if !defined(BTH_GPIO_LED_PIN) || !defined(BTH_GPIO_LED_ACTIVE_HIGH)
+#error "GPIO LED requires an explicit pin and active polarity in boards/<profile>/led_config.hpp"
+#endif
+static_assert(BTH_GPIO_LED_ACTIVE_HIGH == 0 || BTH_GPIO_LED_ACTIVE_HIGH == 1,
+              "BTH_GPIO_LED_ACTIVE_HIGH must be 0 or 1");
+inline constexpr int led_gpio = BTH_GPIO_LED_PIN;
+inline constexpr bool led_active_high = BTH_GPIO_LED_ACTIVE_HIGH != 0;
+static_assert(led_gpio >= 0 && led_gpio <= 48, "Invalid GPIO LED pin");
+#else
+inline constexpr int led_gpio = rgb_led_gpio;
+#endif
 inline constexpr int boot_button_gpio = @BTH_BOOT_BUTTON_GPIO@;
 inline constexpr bool boot_button_active_low = @BTH_BOOT_BUTTON_ACTIVE_LOW@;
 inline constexpr int mains_adc_gpio = @BTH_MAINS_ADC_GPIO@;
@@ -12,6 +37,8 @@ inline constexpr int dc_adc_gpio = @BTH_DC_ADC_GPIO@;
 inline constexpr double dc_divider_ratio = @BTH_DC_DIVIDER_RATIO@;
 inline constexpr int relay_gpio = @BTH_RELAY_GPIO@;
 inline constexpr bool relay_active_high = @BTH_RELAY_ACTIVE_HIGH@;
+inline constexpr int buzzer_gpio = @BTH_BUZZER_GPIO@;
+inline constexpr bool buzzer_active_high = @BTH_BUZZER_ACTIVE_HIGH@;
 inline constexpr bool oled_enabled = @BTH_OLED_ENABLED@;
 inline constexpr int oled_port = @BTH_OLED_PORT@;
 inline constexpr int oled_sda = @BTH_OLED_SDA@;
@@ -20,4 +47,9 @@ inline constexpr unsigned oled_speed_hz = @BTH_OLED_SPEED_HZ@;
 inline constexpr unsigned oled_address = @BTH_OLED_ADDRESS@;
 inline constexpr unsigned oled_contrast = @BTH_OLED_CONTRAST@;
 inline constexpr bool oled_internal_pullups = @BTH_OLED_INTERNAL_PULLUPS@;
+static_assert(led_gpio < 0 ||
+              (led_gpio != relay_gpio && led_gpio != boot_button_gpio && led_gpio != buzzer_gpio &&
+               led_gpio != mains_adc_gpio && led_gpio != dc_adc_gpio &&
+               (!oled_enabled || (led_gpio != oled_sda && led_gpio != oled_scl))),
+              "Selected LED pin conflicts with another board peripheral");
 }  // namespace bth::board

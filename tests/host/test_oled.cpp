@@ -59,6 +59,29 @@ bool pixel(const bth::OledFrame& frame, int x, int y) {
 }
 
 void test_oled() {
+    // Every page, including unavailable and longest values, stays in the
+    // 105 columns starting at x=17 and clears both covered margins.
+    const bth::OledFrame window_frames[] = {
+        bth::render_voltage(888.8, true), bth::render_voltage(0, false),
+        bth::render_voltage(3.5, true, bth::VoltageKind::dc),
+        bth::render_voltage(230, true, bth::VoltageKind::average),
+        bth::render_startup_splash(), bth::render_relay(true, true),
+        bth::render_relay(false, true), bth::render_relay(false, false),
+        bth::render_ipv4({255,255,255,255}), bth::render_ipv4({}),
+        bth::render_mains_period({86399999999ULL,true,true}, false),
+        bth::render_mains_period({}, true),
+        bth::render_battery(12.8, true, {7200,true,true,false}),
+        bth::render_battery(0, false, {})
+    };
+    for (const auto& rendered : window_frames) {
+        bool left_lit = false;
+        for (int y = 0; y < 32; ++y) {
+            left_lit |= pixel(rendered, 17, y);
+            for (int x = 0; x < 128; ++x)
+                if (x < 17 || x >= 122) CHECK_OLED(!pixel(rendered, x, y));
+        }
+        CHECK_OLED(left_lit);
+    }
     {
         FakeTransport bus;
         bth::OledModule oled(bus, 0x8f, 2, 2000, true, true, true, true);
@@ -90,11 +113,11 @@ void test_oled() {
         const auto longest = bth::render_ipv4({255,255,255,255});
         CHECK_OLED(longest != bth::render_ipv4({}) && longest != bth::render_ipv4({192,168,1,123}));
         for (int y = 0; y < 32; ++y)
-            CHECK_OLED(!pixel(longest,0,y) && !pixel(longest,127,y));
+            CHECK_OLED(!pixel(longest,122,y) && !pixel(longest,127,y));
         // Every octet remains visible within the frame.
         for (int octet = 0; octet < 4; ++octet) {
             bool lit = false;
-            for (int x = 4+octet*31; x < 4+octet*31+25; ++x)
+            for (int x = 17+octet*31*105/128; x < 17+(octet*31+25)*105/128; ++x)
                 for (int y = 11; y < 29; ++y) lit = lit || pixel(longest,x,y);
             CHECK_OLED(lit);
         }
@@ -129,7 +152,7 @@ void test_oled() {
             CHECK_OLED(!pixel(longest,x,0) && !pixel(longest,x,31));
         }
         for (int y = 0; y < 32; ++y) {
-            CHECK_OLED(!pixel(longest,0,y) && !pixel(longest,127,y));
+            CHECK_OLED(!pixel(longest,122,y) && !pixel(longest,127,y));
         }
     }
 
@@ -199,9 +222,9 @@ void test_oled() {
         const auto under_hour = bth::render_mains_period({3599999,true,true}, false);
         const auto one_hour = bth::render_mains_period({3600000,true,true}, false);
         CHECK_OLED(under_hour != one_hour);
-        CHECK_OLED(pixel(one_hour,43,0));
-        CHECK_OLED(pixel(one_hour,47,17) && pixel(one_hour,47,25));
-        CHECK_OLED(!pixel(bth::render_mains_period({3600000,false,true},false),43,0));
+        CHECK_OLED(pixel(one_hour, 52,0));
+        CHECK_OLED(pixel(one_hour, 55,17) && pixel(one_hour, 55,25));
+        CHECK_OLED(!pixel(bth::render_mains_period({3600000,false,true},false),52,0));
         CHECK_OLED(one_hour != bth::render_mains_period({3600000,true,true},true));
         constexpr std::uint64_t max_duration_ms = (999ULL * 24 * 60 + 1439) * 60000;
         CHECK_OLED(bth::render_mains_period({max_duration_ms,true,true}, false) ==
@@ -237,17 +260,55 @@ void test_oled() {
     }
     {
         FakeTransport bus;
+        bth::OledModule oled(bus, 0x8f, 1, 0, false, true);
+        bth::Runtime runtime;
+        CHECK_OLED(runtime.add(oled) == Status::ok && runtime.start() == Status::ok);
+        bth::MainsReading reading{};
+        reading.valid = reading.calibrated = true;
+        reading.volts = 230; oled.report(reading);
+        CHECK_OLED(runtime.tick(0) == Status::ok);
+        reading.volts = 240; oled.report(reading);
+        CHECK_OLED(runtime.tick(1000) == Status::ok);
+        // More than a full averaging window of outage samples must not dilute it.
+        for (unsigned ms = 2000; ms <= 71000; ms += 1000) {
+            reading.volts = ms % 2000 == 0 ? 0 : 99.9;
+            oled.report(reading);
+            CHECK_OLED(runtime.tick(ms) == Status::ok);
+            if ((ms / 3000) % 2 == 1)
+                CHECK_OLED(bus.frames.back() == bth::render_voltage(235, true, bth::VoltageKind::average));
+            else
+                CHECK_OLED(bus.frames.back() == bth::render_voltage(reading.volts, true));
+        }
+        reading.volts = 250; oled.report(reading);
+        CHECK_OLED(runtime.tick(72000) == Status::ok);
+        reading.volts = 100; oled.report(reading); // Exact presence threshold counts.
+        CHECK_OLED(runtime.tick(73000) == Status::ok && runtime.tick(75000) == Status::ok);
+        CHECK_OLED(bus.frames.back() == bth::render_voltage(205, true, bth::VoltageKind::average));
+        reading.valid = false; oled.report(reading);
+        CHECK_OLED(runtime.tick(76000) == Status::ok);
+        CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false, bth::VoltageKind::average));
+        reading.valid = true; reading.volts = 0; oled.report(reading);
+        CHECK_OLED(runtime.tick(77000) == Status::ok);
+        CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false, bth::VoltageKind::average));
+        runtime.stop();
+        CHECK_OLED(runtime.start() == Status::ok);
+        oled.report(reading); CHECK_OLED(runtime.tick(0) == Status::ok);
+        oled.report(reading); CHECK_OLED(runtime.tick(3000) == Status::ok);
+        CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false, bth::VoltageKind::average));
+    }
+    {
+        FakeTransport bus;
         bth::OledModule oled(bus, 0x8f, 2, 2000);
         bth::Runtime runtime;
         CHECK_OLED(runtime.add(oled) == Status::ok && runtime.start() == Status::ok);
         const auto splash = bth::render_startup_splash();
         CHECK_OLED(std::equal(splash.begin(), splash.end(), bus.writes[1].begin() + 1));
         // Text bounds, word space, and the dash's middle stroke.
-        CHECK_OLED(pixel(splash, 17, 5) && pixel(splash, 110, 25));
-        CHECK_OLED(pixel(splash, 29, 14) && !pixel(splash, 29, 5));
+        CHECK_OLED(pixel(splash, 17, 5) && pixel(splash, 93, 25));
+        CHECK_OLED(pixel(splash, 26, 14) && !pixel(splash, 26, 5));
         for (int y = 0; y < 32; ++y)
             for (int x = 0; x < 128; ++x)
-                if (x < 17 || x > 110 || y < 5 || y > 25 || (x >= 53 && x <= 62))
+                if (x < 17 || x > 93 || y < 5 || y > 25 || (x >= 47 && x <= 53))
                     CHECK_OLED(!pixel(splash, x, y));
         const auto base = 1ULL << 32;
         CHECK_OLED(runtime.tick(base) == Status::ok);
@@ -349,7 +410,7 @@ void test_oled() {
     }
     const auto frame = bth::render_voltage(230.5, true);
     const auto unavailable = bth::render_voltage(0, false);
-    // Check full display coverage and the decimal point.
+    // Check window coverage and the decimal point.
     int min_x = 128, max_x = -1, min_y = 32, max_y = -1;
     for (int y = 0; y < 32; ++y) {
         for (int x = 0; x < 128; ++x) {
@@ -358,9 +419,9 @@ void test_oled() {
             min_y = std::min(min_y, y); max_y = std::max(max_y, y);
         }
     }
-    CHECK_OLED(min_x == 0 && max_x == 127 && min_y == 0 && max_y == 31);
-    CHECK_OLED(pixel(frame, 82, 28) && pixel(frame, 85, 31));
-    CHECK_OLED(!pixel(frame, 82, 27) && !pixel(frame, 86, 31));
+    CHECK_OLED(min_x == 17 && max_x == 121 && min_y == 0 && max_y == 31);
+    CHECK_OLED(pixel(frame, 84, 28) && pixel(frame, 86, 31));
+    CHECK_OLED(!pixel(frame, 84, 27) && !pixel(frame, 87, 31));
     // Independent segment expectations for 2, 3, 0, 5, including unlit segments.
     constexpr int origins[] = {16, 38, 60, 90};
     constexpr bool expected[4][7] = {
@@ -372,11 +433,11 @@ void test_oled() {
     constexpr int ys[] = {0, 8, 22, 31, 22, 8, 15};
     for (int digit = 0; digit < 4; ++digit) {
         for (int segment = 0; segment < 7; ++segment) {
-            CHECK_OLED(pixel(frame, origins[digit] + xs[segment], ys[segment]) == expected[digit][segment]);
+            CHECK_OLED(pixel(frame, 17 + (origins[digit] + xs[segment]) * 105 / 128, ys[segment]) == expected[digit][segment]);
         }
     }
-    CHECK_OLED(pixel(frame, 112, 0) && pixel(frame, 127, 0));
-    CHECK_OLED(!pixel(frame, 119, 0) && pixel(frame, 119, 31));
+    CHECK_OLED(pixel(frame, 108, 0) && pixel(frame, 121, 0));
+    CHECK_OLED(!pixel(frame, 114, 0) && pixel(frame, 114, 31));
     for (double value : {-1.0, 999.95, 1000.0, std::numeric_limits<double>::infinity(),
                          std::numeric_limits<double>::quiet_NaN()}) {
         CHECK_OLED(bth::render_voltage(value, true) == unavailable);
@@ -385,15 +446,13 @@ void test_oled() {
     CHECK_OLED(bth::render_voltage(229.96, true) == bth::render_voltage(230.0, true));
     CHECK_OLED(bth::render_voltage(999.94, true) != unavailable);
     const auto zero = bth::render_voltage(0, true);
-    for (int y = 0; y < 32; ++y)
-        for (int x = 0; x < 44; ++x) CHECK_OLED(!pixel(zero, x, y));
-    CHECK_OLED(pixel(zero, 64, 0) && !pixel(zero, 64, 15));
-    CHECK_OLED(pixel(frame, 2, 12) && pixel(frame, 8, 18) && !pixel(frame, 6, 10));
+    CHECK_OLED(pixel(zero, 33, 0) && !pixel(zero, 33, 15));
+    CHECK_OLED(pixel(frame, 18, 12) && pixel(frame, 23, 18) && !pixel(frame, 21, 10));
     const auto battery = bth::render_voltage(12.4, true, bth::VoltageKind::dc);
-    CHECK_OLED(pixel(battery, 27, 10) && pixel(battery, 22, 15) && pixel(battery, 33, 17));
-    CHECK_OLED(!pixel(battery, 22, 10));
+    CHECK_OLED(pixel(battery, 21, 10) && pixel(battery, 17, 15) && pixel(battery, 26, 17));
+    CHECK_OLED(!pixel(battery, 17, 10));
     const auto small_battery = bth::render_voltage(3.5, true, bth::VoltageKind::dc);
-    CHECK_OLED(pixel(small_battery, 49, 10) && pixel(small_battery, 44, 15));
+    CHECK_OLED(pixel(small_battery, 21, 10) && pixel(small_battery, 17, 15));
     CHECK_OLED(bth::render_voltage(0, false, bth::VoltageKind::dc) != unavailable);
     {
         FakeTransport bus;

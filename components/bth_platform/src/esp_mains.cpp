@@ -14,12 +14,16 @@ Status checked(esp_err_t error) {
     return Status::hardware_error;
 }
 }
+#if CONFIG_IDF_TARGET_ESP32C6
+// Only the C6 implementation registers this ISR. Other targets may implement
+// atomics with locks and must not compile this C6-only lock-free requirement.
 bool IRAM_ATTR EspMainsInput::overflow(adc_continuous_handle_t,
     const adc_continuous_evt_data_t*, void* context) {
     static_assert(std::atomic<bool>::is_always_lock_free);
     static_cast<EspMainsInput*>(context)->overflow_.store(true, std::memory_order_relaxed);
     return false;
 }
+#endif
 Status EspMainsInput::init() noexcept {
     if (handle_ || dc_calibration_) return Status::invalid_state;
 #if CONFIG_IDF_TARGET_ESP32C6

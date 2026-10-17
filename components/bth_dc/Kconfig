@@ -1,0 +1,9 @@
+menu "B-T HOME DC measurement"
+config BTH_DC_CALIBRATION_PERMILLE
+    int "DC voltage calibration multiplier (1000 = unchanged)"
+    range 100 10000
+    default 1000
+    help
+        Multiplies the voltage calculated from the physical divider ratio.
+        Set to round(current value * reference voltage / reported voltage).
+endmenu

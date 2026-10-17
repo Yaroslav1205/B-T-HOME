@@ -24,11 +24,20 @@ h1{font-size:34px;line-height:1.2;margin:0 0 12px;font-weight:650;letter-spacing
 #detail{color:var(--muted);font-size:14px;line-height:1.6;min-height:48px;margin:0 0 28px}
 button{width:100%;border:0;border-radius:14px;padding:17px;background:var(--accent);color:var(--accent-text);font:600 16px system-ui;cursor:pointer;transition:background .15s}
 button:hover{background:var(--accent-hover)}button.off{background:var(--secondary);color:var(--secondary-text)}button:disabled{opacity:.5;cursor:default}button:focus-visible{outline:3px solid var(--focus);outline-offset:4px}
+#toggle{display:grid;place-items:center;width:112px;height:112px;margin:0 auto;padding:0;border-radius:50%;border:1px solid var(--border);background:var(--surface);color:#778080;box-shadow:0 6px 18px var(--shadow),inset 0 0 0 7px var(--bg);transition:color .2s,border-color .2s,box-shadow .2s,transform .15s}
+#toggle svg{width:44px;height:44px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+#toggle[data-on="true"]{color:#d83c44;border-color:#d83c4466;box-shadow:0 6px 22px #d83c441a,inset 0 0 0 7px #d83c440d}
+:root[data-theme="dark"] #toggle{color:#9aa3a3}
+:root[data-theme="dark"] #toggle[data-on="true"]{color:#ff6870;border-color:#ff687066}
+#toggle:hover:not(:disabled){transform:translateY(-2px);border-color:currentColor}
+#toggle:active:not(:disabled){transform:scale(.96)}
+@media(prefers-reduced-motion:reduce){#toggle{transition:none}#toggle:hover:not(:disabled),#toggle:active:not(:disabled){transform:none}}
 #message{min-height:42px;font-size:13px;line-height:1.5;margin:18px 0 0;color:var(--muted)}#message.error{color:var(--error)}
 footer{font-size:12px;line-height:1.6;color:var(--muted);margin:20px 8px}noscript{display:block;color:var(--error);margin-top:20px}
 [hidden]{display:none!important}article+article{margin-top:18px}
 form{display:grid;gap:14px}label{font-size:13px;color:var(--muted);display:grid;gap:6px}
 input{width:100%;border:1px solid var(--input-border);border-radius:10px;padding:12px;font:16px system-ui;background:var(--surface);color:var(--text)}
+label:has(input[type=checkbox]){display:flex;align-items:center;gap:8px}input[type=checkbox]{width:18px;height:18px;padding:0}
 input:focus{outline:2px solid var(--focus);outline-offset:1px}h2{font-size:22px;margin:0 0 20px}
 small{color:var(--muted);font-size:12px;line-height:1.5}fieldset{border:0;padding:0;margin:0;display:grid;gap:14px}
 summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
@@ -79,7 +88,9 @@ summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
 <p class="label">Керування реле</p>
 <h1 id="state" aria-live="polite">Завантаження…</h1>
 <p id="detail">Отримуємо стан від пристрою.</p>
-<button id="toggle" type="button" disabled>Зачекайте</button>
+<button id="toggle" type="button" aria-label="Керування реле" aria-describedby="state" disabled>
+<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v9M6.35 5.65a8 8 0 1 0 11.3 0"/></svg>
+</button>
 <p id="message" role="status" aria-live="polite"></p>
 <noscript>Увімкніть JavaScript, щоб керувати реле.</noscript>
 </article>
@@ -96,13 +107,23 @@ summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
 </details>
 </article>
 <article>
+<details id="buzzerPanel"><summary>Звуковий сигнал</summary>
+<form id="buzzerForm"><fieldset id="buzzerFields" disabled>
+<label>Інтервал нагадування, секунд<input id="buzzerInterval" type="number" min="0" max="86400" step="1" required inputmode="numeric" aria-describedby="buzzerHelp"></label>
+<small id="buzzerHelp">0 — без звуку. Від 1 до 86400 — короткий сигнал при зникненні мережі та повторення через заданий інтервал. Налаштування зберігається після вимкнення живлення.</small>
+<button type="submit">Зберегти інтервал</button>
+</fieldset><p id="buzzerMessage" class="feedback" role="status"></p></form>
+</details>
+</article>
+<article>
 <details id="settingsPanel"><summary>Налаштування доступу</summary>
 <form id="settingsForm"><fieldset id="settingsFields">
 <div id="wifiSettings">
-<label>Назва Wi-Fi<input id="ssid" name="ssid" required maxlength="32" autocomplete="off"></label>
+<label>Назва точки доступу пристрою<input id="ssid" name="ssid" required maxlength="32" autocomplete="off"></label>
 <small>До 32 байтів UTF-8. Після зміни мережі потрібно перепідключитися.</small>
 <label>Новий пароль Wi-Fi<input id="wifiPassword" type="password" minlength="8" maxlength="63" autocomplete="new-password" placeholder="Залишити поточний"></label>
 <small>8–63 латинські символи, цифри або знаки.</small>
+
 </div>
 <small id="matterWifiNotice" hidden>Домашня мережа Wi-Fi налаштовується застосунком під час сполучення Matter.</small>
 <label>Логін сторінки<input id="webUsername" required maxlength="32" autocomplete="username"></label>
@@ -112,8 +133,23 @@ summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
 </fieldset><p id="settingsMessage" class="feedback" role="status"></p></form>
 </details>
 </article>
+<article id="routerArticle">
+<details id="routerPanel"><summary>Підключення до роутера</summary>
+<form id="routerForm"><fieldset id="routerFields">
+<p><small>BOOT: коротке натискання перемикає точку → клієнт → Zigbee. Мережі перевіряються по черзі. Зміни застосуються при наступному вході в режим клієнта або після перезапуску.</small></p>
+<label>Основна мережа (SSID)<input id="primarySsid" maxlength="32" autocomplete="off"></label>
+<label>Пароль основної мережі<input id="primaryPassword" type="password" minlength="8" maxlength="63" autocomplete="new-password" placeholder="Залишити збережений пароль"></label>
+<label><input id="primaryOpen" type="checkbox"> Основна мережа без пароля</label>
+<label>Резервна мережа (SSID)<input id="backupSsid" maxlength="32" autocomplete="off"></label>
+<label>Пароль резервної мережі<input id="backupPassword" type="password" minlength="8" maxlength="63" autocomplete="new-password" placeholder="Залишити збережений пароль"></label>
+<label><input id="backupOpen" type="checkbox"> Резервна мережа без пароля</label>
+<small>Порожній SSID видаляє мережу. Для нового SSID введіть пароль або позначте мережу без пароля. Порожнє поле пароля зберігає попередній пароль лише для того самого SSID.</small>
+<button type="submit">Зберегти мережі</button>
+</fieldset><p id="routerMessage" class="feedback" role="status"></p></form>
+</details>
+</article>
 </section>
-<footer>Стан підтверджує пристрій. Після відновлення живлення реле повернеться до збереженого стану.</footer>
+
 </main>
 <script>
 'use strict';
@@ -181,6 +217,7 @@ setInterval(()=>{
 },250);
 function notify(text){notice.textContent=text;notice.hidden=!text;}
 function showLogin(text=''){
+  element('buzzerFields').disabled=true;element('buzzerInterval').value='';
   clearZigbee();
   clearVoltages();
   signedIn=false;current=null;app.hidden=true;loginCard.hidden=false;element('logout').hidden=true;
@@ -196,7 +233,8 @@ function show(state){
   title.textContent=state.output_known?(state.on?'Увімкнено':'Вимкнено'):'Стан невідомий';
   const saved=state.storage_known&&state.output_known&&state.on===state.saved_on;
   detail.textContent=saved?'Стан збережено. Він відновиться після перезапуску.':'Не вдалося підтвердити збережений стан.';
-  button.textContent=state.on?'Вимкнути реле':'Увімкнути реле';button.className=state.on?'off':'';
+  button.dataset.on=String(state.output_known&&state.on);
+  button.setAttribute('aria-label',state.output_known?(state.on?'Вимкнути реле':'Увімкнути реле'):'Стан реле невідомий');
   button.disabled=!state.ready||!state.output_known||changing;
   if(!state.ready){message.className='error';message.textContent=state.error==='ok'?'Реле не налаштоване для цієї плати.':'Помилка пристрою. Керування недоступне.';}
 }
@@ -205,7 +243,7 @@ function offline(){
   clearVoltages('Немає зв’язку');
   current=null;connection.textContent='Немає зв’язку';connection.className='link';
   title.textContent='Стан невідомий';detail.textContent='Перевірте підключення до Wi-Fi пристрою.';
-  button.disabled=true;button.textContent='Очікуємо пристрій';
+  button.disabled=true;button.dataset.on='false';button.setAttribute('aria-label','Очікуємо пристрій');
   message.className='error';message.textContent='Підтвердження немає. Повторно отримуємо стан…';
 }
 async function api(path,options={}){
@@ -261,15 +299,59 @@ async function zigbeeAction(action){
 }
 element('zigbeeJoin').addEventListener('click',()=>zigbeeAction('join'));
 element('zigbeeReset').addEventListener('click',()=>zigbeeAction('reset'));
+async function loadBuzzer(){
+  const feedback=element('buzzerMessage');
+  element('buzzerFields').disabled=true;
+  try{
+    const result=await api('/api/buzzer');
+    if(result.status===401){showLogin();return;}
+    if(!result.ok)throw new Error('buzzer');
+    element('buzzerPanel').parentElement.hidden=result.data.available===false;
+    if(result.data.available===false)return;
+    const seconds=result.data.interval_seconds;
+    if(!Number.isInteger(seconds)||seconds<0||seconds>86400)throw new Error('interval');
+    element('buzzerInterval').value=seconds;
+    element('buzzerFields').disabled=false;
+    feedback.className='feedback';feedback.textContent=seconds===0?'Звукове нагадування вимкнено.':'Поточний інтервал: '+seconds+' с.';
+  }catch{
+    feedback.className='feedback error';feedback.textContent='Не вдалося прочитати інтервал. Оновіть сторінку.';
+  }
+}
+element('buzzerForm').addEventListener('submit',async event=>{
+  event.preventDefault();if(busy||!signedIn)return;
+  const input=element('buzzerInterval'),feedback=element('buzzerMessage');
+  const seconds=Number(input.value);
+  if(input.value.trim()===''||!Number.isInteger(seconds)||seconds<0||seconds>86400){
+    feedback.className='feedback error';feedback.textContent='Вкажіть ціле число від 0 до 86400 секунд.';return;
+  }
+  busy=true;element('buzzerFields').disabled=true;
+  feedback.className='feedback';feedback.textContent='Зберігаємо…';
+  try{
+    const result=await api('/api/buzzer',mutation('PUT',{interval_seconds:seconds}));
+    if(result.status===401){showLogin();return;}
+    if(!result.ok||result.data.interval_seconds!==seconds)throw new Error('save');
+    input.value=result.data.interval_seconds;
+    feedback.textContent=seconds===0?'Збережено. Звукове нагадування вимкнено.':'Збережено. Інтервал: '+seconds+' с.';
+  }catch{
+    feedback.className='feedback error';feedback.textContent='Збереження не підтверджено. Оновіть сторінку й перевірте поточний інтервал.';
+  }finally{busy=false;element('buzzerFields').disabled=!signedIn;}
+});
 async function loadSettings(){
   const result=await api('/api/settings');
   if(result.status===401){showLogin();return;}
   if(!result.ok)throw new Error('settings');
   element('ssid').value=result.data.ssid;element('webUsername').value=result.data.username;
+  for(const key of ['primary','backup']){
+    element(key+'Ssid').value=result.data[key+'_ssid']||'';
+    element(key+'Open').checked=!!result.data[key+'_open'];
+    element(key+'Password').value='';
+  }
   element('wifiSettings').hidden=!!result.data.wifi_managed_by_matter;
+  element('routerArticle').hidden=!!result.data.wifi_managed_by_matter;
   element('matterWifiNotice').hidden=!result.data.wifi_managed_by_matter;
-  element('wifiPassword').value='';element('webPassword').value='';element('webPasswordConfirm').value='';
+  element('primaryPassword').value='';element('backupPassword').value='';element('wifiPassword').value='';element('webPassword').value='';element('webPasswordConfirm').value='';
   if(result.data.wifi_pending)notify('Налаштування Wi-Fi збережені, але ще не застосовані. Перезапустіть пристрій.');
+  await loadBuzzer();
 }
 async function refresh(){
   if(busy)return;busy=true;
@@ -329,6 +411,26 @@ element('settingsForm').addEventListener('submit',async event=>{
     if(result.data.restart_required)notify('Збережено. Щоб застосувати Wi-Fi «'+result.data.ssid+'», перезапустіть пристрій.');
   }catch{feedback.className='feedback error';feedback.textContent='Відповіді немає. Якщо мережа змінилася, перепідключіться та перевірте налаштування.';}
   finally{busy=false;element('settingsFields').disabled=false;}
+});
+element('routerForm').addEventListener('submit',async event=>{
+  event.preventDefault();if(busy)return;
+  const feedback=element('routerMessage'),networks={};
+  feedback.className='feedback error';
+  for(const key of ['primary','backup']){
+    const ssid=element(key+'Ssid').value,password=element(key+'Password').value,open=element(key+'Open').checked;
+    if(new TextEncoder().encode(ssid).length>32){feedback.textContent='SSID має містити не більше 32 байтів.';return;}
+    if(ssid&&!open&&password&&!/^[\x20-\x7e]{8,63}$/.test(password)){feedback.textContent='Пароль мережі: 8–63 латинські символи, цифри або знаки.';return;}
+    networks[key+'_ssid']=ssid;networks[key+'_password']=password;networks[key+'_open']=open;
+  }
+  busy=true;element('routerFields').disabled=true;feedback.className='feedback';feedback.textContent='Зберігаємо…';
+  try{
+    const result=await api('/api/settings',mutation('PUT',networks));
+    if(result.status===401){showLogin('Увійдіть повторно.');return;}
+    if(!result.ok){feedback.className='feedback error';feedback.textContent=result.status===400?'Перевірте SSID та паролі мереж.':'Не вдалося підтвердити збереження мереж.';return;}
+    element('primaryPassword').value='';element('backupPassword').value='';
+    feedback.textContent='Мережі збережено. Зміни застосуються при наступному вході в режим клієнта або після перезапуску.';
+  }catch{feedback.className='feedback error';feedback.textContent='Пристрій не відповідає. Перевірте підключення.';}
+  finally{busy=false;element('routerFields').disabled=false;}
 });
 async function poll(){if(signedIn)await refresh();setTimeout(poll,1500);}
 (async()=>{await refresh();if(signedIn){try{await loadSettings();}catch{notify('Не вдалося прочитати налаштування. Оновіть сторінку.');}}else if(loginCard.hidden){showLogin('Підключіться до Wi-Fi пристрою.');}poll();})();

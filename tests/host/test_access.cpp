@@ -88,7 +88,7 @@ void test_access() {
     REQUIRE_ACCESS(access.update(wifi, "owner", "changed", changed) == Status::invalid_state);
     access.deinit();
     // An unknown schema or malformed stored data is never overwritten with defaults.
-    store.fail_save = false; store.disk.version = 2;
+    store.fail_save = false; store.disk.version = 99;
     const auto before = store.writes;
     REQUIRE_ACCESS(access.init() == Status::invalid_argument);
     REQUIRE_ACCESS(store.writes == before); access.deinit();
@@ -99,6 +99,34 @@ void test_access() {
         REQUIRE_ACCESS(settings.init() == Status::hardware_error);
         REQUIRE_ACCESS(!settings.usable());
         settings.deinit(); settings.deinit(); REQUIRE_ACCESS(broken.closes == 1);
+    }
+    {
+        Store networks_store; Codec networks_codec;
+        bth::AccessSettings networks(networks_store, networks_codec, mac);
+        REQUIRE_ACCESS(networks.init() == Status::ok);
+        std::array<bth::WifiSettings, 2> stations{};
+        std::snprintf(stations[0].ssid, sizeof(stations[0].ssid), "%s", "Primary");
+        std::snprintf(stations[0].password, sizeof(stations[0].password), "%s", "primary-password");
+        std::snprintf(stations[1].ssid, sizeof(stations[1].ssid), "%s", "Open backup");
+        bool credentials = true;
+        REQUIRE_ACCESS(networks.update(networks.config().wifi, "admin", "", credentials, &stations) == Status::ok);
+        REQUIRE_ACCESS(!credentials && networks_store.writes == 2);
+        REQUIRE_ACCESS(networks.update(networks.config().wifi, "admin", "", credentials, &stations) == Status::ok);
+        REQUIRE_ACCESS(networks_store.writes == 2);
+        networks.deinit(); REQUIRE_ACCESS(networks.init() == Status::ok);
+        REQUIRE_ACCESS(bth::same_wifi(networks.config().stations[0], stations[0]));
+        REQUIRE_ACCESS(bth::same_wifi(networks.config().stations[1], stations[1]));
+        std::snprintf(stations[1].password, sizeof(stations[1].password), "%s", "short");
+        REQUIRE_ACCESS(networks.update(networks.config().wifi, "admin", "", credentials, &stations) == Status::invalid_argument);
+        REQUIRE_ACCESS(networks_store.writes == 2);
+        stations[1] = {};
+        REQUIRE_ACCESS(networks.update(networks.config().wifi, "admin", "", credentials, &stations) == Status::ok);
+        REQUIRE_ACCESS(!networks.config().stations[1].ssid[0]);
+        networks_store.fail_save = true;
+        stations[0] = {};
+        REQUIRE_ACCESS(networks.update(networks.config().wifi, "admin", "", credentials, &stations) == Status::hardware_error);
+        REQUIRE_ACCESS(!networks.usable());
+        networks.deinit();
     }
     bth::WifiSettings leading_zero{};
     bth::default_wifi(leading_zero, {0, 0, 0, 0, 0, 1});

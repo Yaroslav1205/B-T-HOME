@@ -1,33 +1,120 @@
 # Збірка й перевірка
 
-## Поточний профіль: Matter через Wi-Fi
+## Огляд коду — 09.10.2026
 
-Для `esp32c6_rgb8` команди `scripts/idf.ps1 -Action build|flash|monitor|menuconfig|size|reconfigure`
-передають роботу до `scripts/matter.ps1`. Збірка відбувається у WSL `BTHMatter`
-з ESP-IDF 5.4.1 та ESP-Matter 1.4.2; готові файли копіюються до
-`build/matter-esp32c6_rgb8`. Windows SDK використовується лише для USB-прошивання
-та монітора. [Налаштування середовища й підключення](MATTER.md).
+Причини змін і межі огляду: [REVIEW.md](REVIEW.md).
 
-У VS Code кнопка **ESP-IDF: Build** запускає Matter через Windows CMake-обгортку
-та WSL. **Ctrl+Shift+B** запускає лише збірку.
-Повний цикл: **Terminal → Run Task → B-T HOME: Build, Flash and Monitor (Matter Wi-Fi)**.
-Після зміни налаштувань виконайте **Developer: Reload Window**.
-Для конфігурації запускайте **B-T HOME: menuconfig Matter Wi-Fi**. Не запускайте
-вбудований ESP-IDF `menuconfig` для цього профілю: Windows bridge не має цілі
-`confserver`; Matter menuconfig має виконуватися в WSL.
+- `scripts/test.ps1`: пройдено 31 групу host-сценаріїв (одна CTest-ціль),
+  MSVC, C++17, попередження як помилки; переносні бібліотеки без exceptions і RTTI.
+  Додано відмови виділення ресурсів, зупинку/повторний запуск relay worker,
+  межі HTTP-команд, вкладений JSON та нульові байти.
+- `tests/web/test_ui.py`: headless Edge з підставним API — пройдено.
+  Перевірено вхід, налаштування, перепідключення, реле, Zigbee UI, напруги,
+  прострочення даних і повідомлення про помилки. Це не тест реального HTTP-сервера.
+- Перевірка компілятором `main/application.cpp` з окремою копією заголовка
+  конфігурації: інтервал 50 мс прийнято, 1000 мс відхилено саме новою перевіркою.
+  Робочий `sdkconfig` для цього не змінювався.
+- Native ESP32-C6 `esp32c6_rgb8`: збірка ESP-IDF v5.4 через `scripts/idf.ps1`
+  та експорт артефактів IDE пройдені; образ `0x113970`, 46% розділу вільно.
+- `generic_esp32c3` і `generic_esp32s3`: успішна збірка після обмеження
+  C6 ADC ISR відповідною платформою. Образи `0xd04e0` та `0xc5650` відповідно.
+- `generic_esp32` і `generic_esp32c6`: успішна збірка, образи `0xc7080`
+  та `0xd5d10` відповідно. Отже, перевірено всі п'ять native-профілів CI локально.
+- Окремий Matter-варіант: збірка через `scripts/idf.ps1 -Matter` і наявний
+  WSL/ESP-Matter пройдена, артефакти експортовано у Windows; образ `0x1aeed0`,
+  16% розділу вільно.
+- Прошивання, живі Wi-Fi/Zigbee/Matter, натискання кнопок IDE та віддалений CI
+  під час огляду не запускалися. Калібрування й встановлені SDK не змінювалися.
+
+## Поточний профіль: Zigbee та Wi-Fi AP
+
+Для `esp32c6_rgb8` скрипт `scripts/idf.ps1` збирає native ESP-IDF прошивку
+з `BTH_WITH_MATTER=OFF`, Zigbee та точкою доступу Wi-Fi. WSL не потрібен.
+Використовуються `build/esp32c6_rgb8` і його окремий `sdkconfig`.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/matter.ps1 -Action build
-powershell -ExecutionPolicy Bypass -File scripts/matter.ps1 -Action flash -Port COM11
-powershell -ExecutionPolicy Bypass -File scripts/matter.ps1 -Action monitor -Port COM11
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/idf.ps1 -Action build
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/idf.ps1 -Action menuconfig
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
 ```
 
-Порт потрібно замінити на фактичний. Прошивання записує завантажувач, таблицю
-розділів і застосунок; не стирає весь flash. Перед записом скрипт перевіряє,
-що артефакти належать Matter-збірці. `-Action flash` використовує вже готові файли.
+**Ctrl+Shift+B** запускає лише збірку. Задачі прошивання, монітора й повного
+циклу доступні через **Terminal → Run Task → B-T HOME: ... Zigbee + Wi-Fi AP**.
+Кнопка **ESP-IDF: Build** також підтримана: `BTH_WINDOWS_NATIVE_BRIDGE=ON`
+вмикає CMake-обгортку з окремим кешем `build/vscode-native-esp32c6_rgb8`.
+Вона викликає `scripts/idf.ps1`, який тимчасово відображає папку як `R:`.
+Після успішної збірки образи й метадані для Flash/Monitor копіюються до каталогу IDE;
+у метаданих тимчасові шляхи замінюються фізичними. Native `sdkconfig` залишається
+в `build/esp32c6_rgb8`; кеші CMake не копіюються й не змішуються.
+**SDK Configuration Editor** підтриманий через ціль `confserver`. Сервер використовує
+фізичні шляхи й зберігає зміни безпосередньо в native `sdkconfig`; відкритий редактор
+не займає `R:`. Перед збіркою збережіть зміни. Термінальна задача
+**B-T HOME: menuconfig Zigbee + Wi-Fi AP** редагує той самий файл.
+Експорт конфігурації та `compile_commands.json` виконується вже при Reconfigure,
+тому редактор SDK й аналіз коду доступні до першої компіляції.
+Після зміни `.vscode` виконайте **Developer: Reload Window**.
 
-Опис native Windows-збірки нижче залишається для інших профілів і попередньої
-версії Wi-Fi AP. Для AP на `esp32c6_rgb8` потрібно явно додати `-WifiAp`.
+### Стандартні кнопки VS Code
+
+| Команда | Поведінка |
+| --- | --- |
+| Build / Ctrl+Shift+B | Windows ESP-IDF v5.4, Zigbee + Wi-Fi AP; обидва маршрути оновлюють образи IDE |
+| SDK Configuration Editor / Reconfigure | Конфігурація профілю `esp32c6_rgb8`, єдиний `build/esp32c6_rgb8/sdkconfig` |
+| Full Clean | Видалення кешу IDE та native-кешу/об’єктів із `idf.extraCleanPaths`; `sdkconfig` і калібрування залишаються |
+| Size | Звіт пам’яті після збірки; доступні також CMake-цілі `size`, `size-components`, `size-files` |
+| Select Port / Flash / Monitor | Спільний `idf.port` для розширення й задач; вихід із монітора — `Ctrl+]` |
+| Build, Flash and Monitor | Послідовно збірка, прошивання та інтерактивний монітор |
+| Debug / F5 | Конфігурація `B-T HOME: ESP32-C6 USB JTAG`, ELF із каталогу IDE, зіставлення вихідних шляхів `R:/` |
+
+Debug використовує вбудований USB JTAG (`board/esp32c6-builtin.cfg`), тому потрібні
+native USB підключення та відповідний драйвер. Він збирає актуальний ELF перед
+підключенням, але не прошиває автоматично: образ на платі має відповідати ELF.
+Порт `COM11` — поточне налаштування, його можна змінити кнопкою Select Port.
+Вибір іншого чипа не замінює профіль плати: для інших плат використовуйте
+`scripts/idf.ps1 -Board <profile>` та відповідні налаштування IDE.
+
+`compile_commands.json` містить Windows-аргументи з фізичними шляхами, включно
+зі шляхами з пробілами; його використовують C/C++ IntelliSense та clangd.
+Кеш native-компіляції залишається окремим і зберігає шляхи `R:`.
+
+Параметри профілю: `CONFIG_BTH_MATTER_ENABLED=n`, `CONFIG_BTH_ZIGBEE_ENABLED=y`,
+`CONFIG_ZB_ENABLED=y`, `CONFIG_ZB_ZED=y`, `CONFIG_ZB_RADIO_NATIVE=y`.
+Для наявного `sdkconfig` застосуйте їх через menuconfig; defaults не замінюють
+старих значень. Збережіть калібрування мережі: для встановленого датчика
+`CONFIG_BTH_MAINS_MILLIVOLTS_PER_COUNT=1355`.
+
+Після запуску активний Zigbee; BOOT 3 с із відпусканням перемикає на Wi-Fi AP
+і назад. [Підключення](ZIGBEE.md). Для переходу з Matter потрібне прошивання
+з bootloader і таблицею розділів, а не лише застосунку:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/idf.ps1 -Action flash -Port COM11
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/idf.ps1 -Action monitor -Port COM11
+```
+
+Порт замініть на фактичний. Повного стирання flash немає: адреси NVS реле,
+вебдоступу й Zigbee залишаються тими самими. Старий розділ Matter більше не
+використовується. Фізична перевірка потребує окремого прошивання користувачем.
+
+Matter залишається окремою необов’язковою збіркою через `scripts/matter.ps1`
+або `scripts/idf.ps1 -Matter`; [інструкція](MATTER.md).
+`-WifiAp` збережено як сумісний псевдонім native-збірки; він не вимикає Zigbee.
+
+### Перевірка переходу з Matter — 08.10.2026
+
+- `scripts/test.ps1`: пройдено 30 host-сценаріїв, включно з перемиканням
+  Zigbee/Wi-Fi, BOOT, вимірюваннями, батареєю, OLED та реле.
+- `scripts/idf.ps1 -Action build`: успішна збірка ESP32-C6 на ESP-IDF v5.4.
+  У згенерованій конфігурації Zigbee End Device і SoftAP увімкнені, Matter вимкнений;
+  калібрування мережі — 1355. Образ `bt_home.bin` — `0x112a40` байтів,
+  вільно 46% розділу застосунку.
+- Плату не прошивали; фізичне перемикання інтерфейсів і підключення до шлюзу
+  в межах цієї зміни не перевіряли.
+
+Виправлення кнопки Build: попередні налаштування IDE напряму відкривали кеш
+native-збірки з шляхами `R:` через фізичний шлях із пробілами. Тепер IDE має
+власний кеш і викликає обгортку. Перевірено CMake configure/build через цей
+маршрут; прошивання та натискання кнопок у самому вікні VS Code не виконувалися.
 
 ## Інструменти
 
@@ -53,19 +140,16 @@ Component Manager перераховує залежності.
 
 ### VS Code: збірка та налаштування SDK
 
-У цій папці використовуйте задачі проєкту:
+У цій папці використовуйте стандартні кнопки ESP-IDF або задачі проєкту:
 
-- `scripts/idf.ps1 -Action build -WifiAp` — попередня збірка Wi-Fi AP.
-- **Terminal → Run Task…** → `B-T HOME: menuconfig legacy Wi-Fi AP` — налаштування SDK
+- `scripts/idf.ps1 -Action build` — Zigbee та Wi-Fi AP.
+- **Terminal → Run Task…** → `B-T HOME: menuconfig Zigbee + Wi-Fi AP` — налаштування SDK
   у терміналі. Збережіть зміни та вийдіть із menuconfig перед збіркою.
 
 Обидві задачі викликають `scripts/idf.ps1` і працюють зі спільною конфігурацією
 `build/esp32c6_rgb8/sdkconfig`. У menuconfig є розділ `B-T HOME mains measurement`.
 
-Кнопка **ESP-IDF: Build your Project** налаштована на Matter через WSL.
-Для попередньої Wi-Fi AP версії використовуйте скрипт із `-WifiAp`;
-графічний **SDK Configuration Editor** замінює термінальний menuconfig.
-Пряма native ESP-IDF збірка у фізичному шляху з пробілами не підтримується.
+Графічний SDK Configuration Editor використовує ту саму конфігурацію.
 
 Помилка `Environment IDF_TARGET conflicts with esp32c6_rgb8` означає, що
 розширення передало інший чип. У `.vscode/settings.json` для цього workspace
@@ -73,10 +157,8 @@ Component Manager перераховує залежності.
 виконайте **Developer: Reload Window**. Не змінюйте профіль плати на ESP32,
 щоб обійти цю перевірку.
 
-Розширення використовує `build/matter-esp32c6_rgb8` і кореневий `CMakeLists.txt`
-з `BTH_WINDOWS_MATTER_BRIDGE=ON`. Повторна конфігурація через `idf.py`
-використовує той самий каталог джерел. Native-скрипт явно вимикає цю обгортку.
-Відновлення після конфлікту старого CMake-кешу описане в [MATTER.md](MATTER.md).
+Налаштування workspace вказують на `build/vscode-native-esp32c6_rgb8`;
+native bridge увімкнено, Matter bridge вимкнено.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\idf.ps1 -Action build
@@ -109,7 +191,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\idf.ps1 -Board gen
 
 ```sh
 unset IDF_TARGET
-# Попередній Wi-Fi AP; основну Matter-збірку описано в MATTER.md.
+# Основний профіль Zigbee + Wi-Fi AP.
 idf.py -B build/esp32c6_rgb8 -D BTH_BOARD=esp32c6_rgb8 -D BTH_WITH_MATTER=OFF build
 idf.py -B build/esp32c6_rgb8 -D BTH_BOARD=esp32c6_rgb8 -D BTH_WITH_MATTER=OFF menuconfig
 
@@ -148,7 +230,7 @@ Host-тести перевіряють порядок викликів, зале
 
 CI описує host-тести в Linux і збірку `esp32c6_rgb8` та чотирьох generic-профілів
 у `espressif/idf:v5.4` з явним `BTH_WITH_MATTER=OFF`. Ця матриця перевіряє
-попередні native-профілі; Matter перевіряється окремою локальною збіркою з ESP-Matter.
+native-профілі; Matter перевіряється окремою локальною збіркою з ESP-Matter.
 Він запуститься після розміщення проєкту на GitHub; сама наявність workflow не є
 свідченням успішного віддаленого запуску.
 
@@ -189,11 +271,10 @@ CI описує host-тести в Linux і збірку `esp32c6_rgb8` та ч�
 що потрібно перевірити стек саме встановленої прошивки. Проєкт вимагає
 `CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192` або більше; менше значення зупиняє
 компіляцію з поясненням. Shared defaults не перевизначають старий `sdkconfig`.
-У цьому workspace розширення ESP-IDF у VS Code використовує окремий
-`build/vscode-esp32c6_rgb8/sdkconfig`, а `scripts/idf.ps1` —
-`build/esp32c6_rgb8/sdkconfig`. Зміна однієї конфігурації не оновлює іншу.
-Для обох потрібні стек 8192, HTTP-заголовки 4096 і flash 4 MB; після зміни
-переконфігуруйте саме ту папку збірки, з якої прошиваєте пристрій.
+Розширення ESP-IDF та `scripts/idf.ps1` тепер використовують єдиний
+`build/esp32c6_rgb8/sdkconfig`. Старий `build/vscode-esp32c6_rgb8` більше
+не використовується. Потрібні стек 8192, HTTP-заголовки 4096 і flash 4 MB;
+після зміни збережіть конфігурацію та зберіть прошивку заново.
 На старті друкується `Main task stack: configured=8192 bytes`; heartbeat показує
 `main_stack_min_free` — найменший залишок стека від запуску. Перевіряйте його
 після кількох циклів вимірювання, разом з ELF SHA256 у стартовому журналі.
@@ -220,16 +301,37 @@ WSL завершилася успішно, як і Windows host-тести.
 
 У налаштуваннях цього workspace вимкнено автоматичну конфігурацію CMake Tools,
 а `build` і `managed_components` виключено з файлового спостереження та пошуку.
-**Ctrl+Shift+B** тепер запускає лише Matter-збірку у видимому терміналі.
+На дату цієї перевірки **Ctrl+Shift+B** запускав лише Matter-збірку у видимому терміналі.
+Із 08.10.2026 основна збірка — Windows Zigbee + Wi-Fi AP, описана вище.
 Повний цикл Build/Flash/Monitor залишається окремою задачею; монітор працює
 до **Ctrl+]**, тому його активна задача після компіляції є нормальною.
 
-Компіляція: Windows PowerShell → WSL `BTHMatter` → `/root/bth-home` →
+Для окремого Matter-варіанта компіляція: Windows PowerShell → WSL `BTHMatter` → `/root/bth-home` →
 ESP-IDF/Ninja → копіювання у `build/matter-esp32c6_rgb8`.
 Остаточний успіх: `Matter build complete (WSL exited successfully; Windows artifacts ready).`
 Windows-каталог містить артефакти та CMake-обгортку, але не
 `compile_commands.json`: наявне посилання clangd на нього не дає повної
-конфігурації IntelliSense. Це окреме обмеження від компіляції у WSL.
+конфігурації IntelliSense для Matter. Основна native-збірка вже експортує цю базу.
+
+## Перевірка середовища й команд IDE — 08.10.2026
+
+- `scripts/test.ps1`: 30 host-сценаріїв пройдено.
+- Native Build і CMake-обгортка IDE: успішна компіляція ESP32-C6 на ESP-IDF v5.4.
+  Повторено видалення тих самих каталогів, які очищує Full Clean розширення,
+  та збірку з нуля: 924 кроки, `bt_home.bin` — `0x112a40` байтів, 46% розділу вільно.
+  Контрольна сума `sdkconfig` після очищення не змінилася.
+- SDK Configuration Editor: перевірено маршрут `idf.py ... confserver`, читання,
+  зміну значення й збереження в окремий перевірочний файл. Робоче калібрування
+  залишилося 1355. Сервер працює без підключеного диска `R:`.
+- Size: пройдено CMake-ціль та всі три JSON-запити GUI (огляд, архіви, файли).
+- Перевірено 828 команд компіляції: компілятори, вихідні файли й include-каталоги
+  доступні за фізичними шляхами. `clangd --check=main/application.cpp` — 0 помилок.
+- Образи, ELF та map у каталозі IDE побайтово збігаються з native-збіркою;
+  `esptool image_info` успішно розібрав образ. Монітор запускається з `--help`
+  у терміналі. GDB відкрив ELF та знайшов `app_main.cpp` через substitute-path.
+- Кнопки перевірено на рівні команд установленого ESP-IDF extension 2.3.0;
+  натискання в GUI, Flash, живий Monitor і JTAG-підключення до плати не виконувалися.
+  Для завершення апаратної перевірки потрібні підключена плата й відповідний порт.
 
 ## Офіційні довідники
 

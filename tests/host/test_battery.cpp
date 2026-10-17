@@ -43,7 +43,7 @@ void reports(bth::BatteryModule& battery, bool mains, double dc = 12.8, bool val
 void test_battery() {
     {
         Store store; Sink sink;
-        bth::BatteryModule battery(store, sink, {});
+        bth::BatteryModule battery(store, sink, {12000, 100000, 1500, 10.0});
         bth::Runtime runtime;
         CHECK_BATTERY(runtime.add(battery) == Status::ok && runtime.start() == Status::ok);
         CHECK_BATTERY(store.writes == 1 && store.charge == full);
@@ -76,7 +76,7 @@ void test_battery() {
     }
     {
         Store store; store.found = true; store.charge = 6000ULL * 3600000;
-        Sink sink; bth::BatteryModule battery(store, sink, {});
+        Sink sink; bth::BatteryModule battery(store, sink, {12000, 100000, 1500, 10.0});
         CHECK_BATTERY(battery.init() == Status::ok && battery.start() == Status::ok);
         reports(battery, false);
         CHECK_BATTERY(battery.tick(0) == Status::ok && sink.value.minutes == 3600);
@@ -114,7 +114,7 @@ void test_battery() {
         if (failure == 1) store.load_result = Status::hardware_error;
         if (failure == 2) store.save_result = Status::hardware_error;
         if (failure == 3) { store.found = true; store.charge = full + 1; }
-        bth::BatteryModule battery(store, sink, {});
+        bth::BatteryModule battery(store, sink, {12000, 100000, 1500, 10.0});
         bth::Runtime runtime;
         CHECK_BATTERY(runtime.add(battery) == Status::ok && runtime.start() != Status::ok);
         CHECK_BATTERY(!store.opened && store.closes == 1);
@@ -125,7 +125,7 @@ void test_battery() {
         CHECK_BATTERY(runtime.start() == Status::ok);
     }
     {
-        Store store; Sink sink; bth::BatteryModule battery(store, sink, {});
+        Store store; Sink sink; bth::BatteryModule battery(store, sink, {12000, 100000, 1500, 10.0});
         CHECK_BATTERY(battery.init() == Status::ok && battery.start() == Status::ok);
         reports(battery, false, 9.9); CHECK_BATTERY(battery.tick(0) == Status::ok);
         store.save_result = Status::hardware_error;
@@ -142,6 +142,67 @@ void test_battery() {
         CHECK_BATTERY(battery.tick(0) == Status::invalid_state);
         CHECK_BATTERY(battery.service() == Status::invalid_state);
         battery.deinit();
+    }
+    {
+        // User's corrected current is 58 mA at 12.8 V (58000 uA).
+        // Existing NVS stores charge, so changing current must not refill the battery.
+        Store store; store.found = true; store.charge = 6000ULL * 3600000;
+        Sink sink; bth::BatteryModule battery(store, sink, {});
+        CHECK_BATTERY(battery.init() == Status::ok && battery.start() == Status::ok);
+        reports(battery, false, 12.8);
+        CHECK_BATTERY(battery.tick(0) == Status::ok && sink.value.minutes == 6206);
+        CHECK_BATTERY(store.writes == 0);
+        // Verify the integrated charge at the application scheduling interval.
+        for (std::uint64_t now = 20; now <= 3600000; now += 20) {
+            reports(battery, false, 12.8);
+            CHECK_BATTERY(battery.tick(now) == Status::ok);
+        }
+        CHECK_BATTERY(sink.value.minutes == 6146);
+        CHECK_BATTERY(battery.service() == Status::ok);
+        CHECK_BATTERY(store.charge == 6000ULL * 3600000 - 208800000);
+        battery.deinit();
+        CHECK_BATTERY(battery.init() == Status::ok && battery.start() == Status::ok);
+        reports(battery, false, 12.8);
+        CHECK_BATTERY(battery.tick(0) == Status::ok && sink.value.minutes == 6146);
+        reports(battery, false, 10.0);
+        CHECK_BATTERY(battery.tick(20) == Status::ok && sink.value.minutes == 0);
+        CHECK_BATTERY(battery.service() == Status::ok && store.charge == 0);
+        battery.deinit();
+    }
+    {
+        Store store; Sink sink; bth::BatteryModule battery(store, sink, {});
+        CHECK_BATTERY(battery.init() == Status::ok && battery.start() == Status::ok);
+        reports(battery, false, 12.8);
+        CHECK_BATTERY(battery.tick(0) == Status::ok && sink.value.minutes == 12413);
+        CHECK_BATTERY(store.charge == full);
+        battery.deinit();
+    }
+    {
+        // The actual battery range is 10.5-14.3 V. Voltage alone never refills it.
+        Store store; store.found = true; store.charge = 6000ULL * 3600000;
+        Sink sink; bth::BatteryModule battery(store, sink, {});
+        CHECK_BATTERY(battery.init() == Status::ok && battery.start() == Status::ok);
+        reports(battery, false, 10.5001);
+        CHECK_BATTERY(battery.tick(0) == Status::ok && sink.value.valid && sink.value.minutes == 6206);
+        reports(battery, false, 10.5, false);
+        CHECK_BATTERY(battery.tick(20) == Status::ok && !sink.value.valid);
+        reports(battery, true, 14.3);
+        CHECK_BATTERY(battery.tick(40) == Status::ok && sink.value.minutes == 6206);
+        CHECK_BATTERY(battery.service() == Status::ok && store.writes == 0);
+        // A fresh boundary reading without mains depletes and checkpoints immediately.
+        reports(battery, false, 10.5);
+        CHECK_BATTERY(battery.tick(60) == Status::ok && sink.value.valid && sink.value.minutes == 0);
+        CHECK_BATTERY(battery.service() == Status::ok && store.charge == 0);
+        // Recovery to 14.3 V on mains adds only the modeled charge: 25 mAh per minute.
+        reports(battery, true, 14.3);
+        CHECK_BATTERY(battery.tick(80) == Status::ok && sink.value.minutes == 0);
+        for (std::uint64_t now = 1080; now <= 60080; now += 1000) {
+            reports(battery, true, 14.3);
+            CHECK_BATTERY(battery.tick(now) == Status::ok);
+        }
+        CHECK_BATTERY(sink.value.minutes == 25);
+        battery.deinit();
+        CHECK_BATTERY(store.charge == 25ULL * 3600000);
     }
     const auto text = [](double volts, bool valid, bth::BatteryEstimate value, const char* expected) {
         CHECK_BATTERY(std::strcmp(bth::format_battery_line(volts, valid, value).data(), expected) == 0);

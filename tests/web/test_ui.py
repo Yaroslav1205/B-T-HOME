@@ -14,6 +14,7 @@ window.mockVoltages={mains:{volts:230.5,status:'ok',age_ms:0},battery:{volts:12.
 window.mockVoltageFail=false;
 window.mockZigbee={state:'idle',channel:0,seconds_left:0};window.zigbeeWrites=0;window.mockZigbeeFail=false;
 window.mockConfirm=true;window.confirm=()=>mockConfirm;
+window.mockBuzzer={available:true,interval_seconds:20};window.buzzerWrites=0;window.mockBuzzerFail=false;
 window.fetch=async function(url,options){
  if(mockFail)throw new Error('offline');
  const reply=(status,data)=>({status,ok:status>=200&&status<300,json:async()=>({...data})});
@@ -24,6 +25,15 @@ window.fetch=async function(url,options){
  }
  if(url==='/api/logout'){mockAuthorized=false;return reply(200,{ok:true});}
  if(!mockAuthorized)return reply(401,{error:'login_required'});
+ if(url==='/api/buzzer'){
+  if(options.method==='PUT'){
+   if(mockBuzzerFail)return reply(503,{error:'save_failed'});
+   const seconds=JSON.parse(options.body).interval_seconds;
+   if(!Number.isInteger(seconds)||seconds<0||seconds>86400)return reply(400,{error:'invalid_interval'});
+   buzzerWrites++;mockBuzzer.interval_seconds=seconds;
+  }
+  return reply(200,mockBuzzer);
+ }
  if(url==='/api/zigbee'){
   if(mockZigbeeFail)return reply(503,{error:'zigbee_busy'});
   if(options.method==='POST'){
@@ -36,10 +46,15 @@ window.fetch=async function(url,options){
  if(url==='/api/voltages')return reply(mockVoltageFail?503:200,mockVoltages);
  if(url==='/api/settings'){
   if(options.method==='PUT'){
-   settingsWrites++;const data=JSON.parse(options.body);
+   settingsWrites++;const submitted=JSON.parse(options.body);
+   const data={ssid:mockSettings.ssid,username:mockSettings.username,wifi_password:'',web_password:'',...submitted};
    if(mockSaveFail)return reply(503,{error:'save_failed'});
    const login_required=data.username!==mockSettings.username||!!data.web_password;
    const reconnect=data.ssid!==mockSettings.ssid||(!!data.wifi_password&&data.wifi_password!==mockWifiPassword);
+   for(const key of ['primary','backup']){
+    if(key+'_ssid' in data){mockSettings[key+'_ssid']=data[key+'_ssid'];mockSettings[key+'_open']=data[key+'_open'];}
+   }
+   window.lastSettingsWrite=submitted;
    mockSettings.ssid=data.ssid;mockSettings.username=data.username;
    if(data.web_password)mockPassword=data.web_password;
    if(data.wifi_password)mockWifiPassword=data.wifi_password;
@@ -68,6 +83,25 @@ CHECKS = r"""
   button.click();check(writeCalls===0,'no unauthenticated UI command');
   await signIn('admin','wrong');check(!signedIn&&!loginCard.hidden,'wrong password');
   await signIn('admin','admin');check(signedIn&&!app.hidden&&!current.on,'default login');
+  check(element('buzzerInterval').value==='20'&&!element('buzzerFields').disabled,'buzzer loaded');
+  element('buzzerInterval').value='0';submit('buzzerForm');await wait(50);
+  check(mockBuzzer.interval_seconds===0&&buzzerWrites===1&&element('buzzerMessage').textContent.includes('вимкнено'),'buzzer disabled');
+  await loadSettings();check(element('buzzerInterval').value==='0','disabled setting restored');
+  element('buzzerInterval').value='60';submit('buzzerForm');await wait(50);
+  check(mockBuzzer.interval_seconds===60&&buzzerWrites===2,'buzzer custom interval');
+  element('buzzerInterval').value='1.5';submit('buzzerForm');await wait(50);
+  check(buzzerWrites===2&&element('buzzerMessage').classList.contains('error'),'fraction rejected');
+  element('buzzerInterval').value='-1';submit('buzzerForm');await wait(50);
+  check(buzzerWrites===2,'negative rejected');
+  element('buzzerInterval').value='86401';submit('buzzerForm');await wait(50);
+  check(buzzerWrites===2,'excess interval rejected');
+  element('buzzerInterval').value='';submit('buzzerForm');await wait(50);
+  check(buzzerWrites===2,'empty interval rejected');
+  mockBuzzerFail=true;element('buzzerInterval').value='30';submit('buzzerForm');await wait(50);
+  check(mockBuzzer.interval_seconds===60&&element('buzzerMessage').classList.contains('error'),'buzzer save failure');
+  mockBuzzerFail=false;await loadSettings();check(element('buzzerInterval').value==='60','failed value not persisted');
+  mockBuzzer.available=false;await loadSettings();check(element('buzzerPanel').parentElement.hidden,'absent buzzer hidden');
+  mockBuzzer.available=true;await loadSettings();check(!element('buzzerPanel').parentElement.hidden,'buzzer restored');
   check(element('deviceMac').textContent===mockState.mac,'device MAC from firmware');
   mockState.wifi_mode='matter';mockSettings.wifi_managed_by_matter=true;
   await refresh();await loadSettings();
@@ -134,6 +168,18 @@ CHECKS = r"""
   check(mockWifiPassword==='wifi-new-123','Wi-Fi password changed');
   await signIn('owner','new-password');check(element('ssid').value==='My B-T HOME','settings restored');
   check(!element('webPassword').value&&!element('wifiPassword').value,'password fields cleared');
+  element('primarySsid').value='Primary router';element('primaryPassword').value='primary-pass';
+  element('backupSsid').value='Backup router';element('backupOpen').checked=true;
+  element('webUsername').value='Unsaved owner';
+  submit('routerForm');await wait(100);
+  check(!('ssid' in lastSettingsWrite)&&!('username' in lastSettingsWrite)&&mockSettings.username==='owner','router save isolates access');
+  check(element('primarySsid').closest('form').id==='routerForm'&&element('routerPanel').closest('article').previousElementSibling.contains(element('settingsPanel')),'separate router section follows access');
+  check(!document.querySelector('footer'),'footer removed');
+  check(lastSettingsWrite.primary_ssid==='Primary router'&&lastSettingsWrite.primary_password==='primary-pass','primary credentials submitted');
+  check(lastSettingsWrite.backup_ssid==='Backup router'&&lastSettingsWrite.backup_open,'open backup submitted');
+  check(!element('primaryPassword').value&&!element('backupPassword').value,'station secrets cleared');
+  await loadSettings();
+  check(element('primarySsid').value==='Primary router'&&element('backupOpen').checked,'station settings restored');
   mockSaveFail=true;element('ssid').value='Unsaved';submit('settingsForm');await wait(100);
   check(mockSettings.ssid==='My B-T HOME'&&element('settingsMessage').classList.contains('error'),'save failure');
   mockSaveFail=false;mockStorageFail=true;button.click();await wait(150);
@@ -156,6 +202,8 @@ def main():
     build = root / "build" / "web-smoke"
     build.mkdir(parents=True, exist_ok=True)
     page = (root / "components/bth_web/web/index.html").read_text(encoding="utf-8")
+    # Checks drive refresh explicitly; background polls can race expiry assertions.
+    page = page.replace("poll();})();", "})();")
     page = page.replace("<script>", "<script>" + MOCK + "</script><script>", 1)
     page = page.replace("</body>", "<script>" + CHECKS + "</script></body>")
     harness = build / "index.html"
@@ -163,7 +211,7 @@ def main():
     result = subprocess.run([
         args.browser, "--headless", "--disable-gpu", "--disable-background-networking",
         "--no-first-run", "--no-default-browser-check",
-        "--user-data-dir=" + str(build / "profile"), "--virtual-time-budget=6000",
+        "--user-data-dir=" + str(build / "profile"), "--virtual-time-budget=8000",
         "--dump-dom", harness.as_uri(),
     ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=45)
     (build / "result.html").write_text(result.stdout, encoding="utf-8")

@@ -182,3 +182,28 @@ if(NOT boot_error)
         set(BTH_BOOT_BUTTON_ACTIVE_LOW false)
     endif()
 endif()
+
+# Active buzzer wiring is explicitly enabled per board.
+set(BTH_BUZZER_GPIO -1)
+set(BTH_BUZZER_ACTIVE_HIGH false)
+string(JSON buzzer_gpio ERROR_VARIABLE buzzer_error GET "${BTH_BOARD_JSON}" buzzer_gpio)
+if(NOT buzzer_error)
+    if(NOT buzzer_gpio MATCHES "^[0-9]+$" OR buzzer_gpio GREATER 48 OR BTH_MAINS_ADC_GPIO LESS 0)
+        message(FATAL_ERROR "Buzzer requires an output GPIO and a mains ADC provider")
+    endif()
+    if(buzzer_gpio EQUAL BTH_RGB_LED_GPIO OR buzzer_gpio EQUAL BTH_RELAY_GPIO OR
+       buzzer_gpio EQUAL BTH_BOOT_BUTTON_GPIO OR buzzer_gpio EQUAL BTH_MAINS_ADC_GPIO OR
+       buzzer_gpio EQUAL BTH_DC_ADC_GPIO OR
+       (BTH_OLED_ENABLED AND (buzzer_gpio EQUAL BTH_OLED_SDA OR buzzer_gpio EQUAL BTH_OLED_SCL)))
+        message(FATAL_ERROR "Buzzer cannot share an assigned GPIO")
+    endif()
+    string(JSON buzzer_polarity_type TYPE "${BTH_BOARD_JSON}" buzzer_active_high)
+    if(NOT buzzer_polarity_type STREQUAL "BOOLEAN")
+        message(FATAL_ERROR "buzzer_active_high must be an explicit boolean")
+    endif()
+    string(JSON buzzer_active_high GET "${BTH_BOARD_JSON}" buzzer_active_high)
+    set(BTH_BUZZER_GPIO "${buzzer_gpio}")
+    if(buzzer_active_high)
+        set(BTH_BUZZER_ACTIVE_HIGH true)
+    endif()
+endif()

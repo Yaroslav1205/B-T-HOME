@@ -10,14 +10,16 @@
 #include "bth/web/voltage.hpp"
 #include "freertos/queue.h"
 #include "bth/zigbee/control.hpp"
+#include "bth/buzzer/settings.hpp"
 namespace bth {
 class RelayWeb final : public Module, public MainsSink, public DcSink {
 public:
-    RelayWeb(RelayService& relay, AccessSettings& settings, WifiAp& wifi, ZigbeeControl* zigbee = nullptr) noexcept
-        : relay_(relay), settings_(settings), wifi_(&wifi), zigbee_(zigbee) {}
+    RelayWeb(RelayService& relay, AccessSettings& settings, WifiAp& wifi,
+             ZigbeeControl* zigbee = nullptr, BuzzerSettings* buzzer = nullptr) noexcept
+        : relay_(relay), settings_(settings), wifi_(&wifi), zigbee_(zigbee), buzzer_(buzzer) {}
     // Matter owns Wi-Fi provisioning; this web server only edits web credentials.
-    RelayWeb(RelayService& relay, AccessSettings& settings) noexcept
-        : relay_(relay), settings_(settings) {}
+    RelayWeb(RelayService& relay, AccessSettings& settings, BuzzerSettings* buzzer = nullptr) noexcept
+        : relay_(relay), settings_(settings), buzzer_(buzzer) {}
     const char* id() const noexcept override { return "web"; }
     Dependencies dependencies() const noexcept override {
         return wifi_ ? Dependencies{required_, zigbee_ ? 4U : 3U} : Dependencies{matter_required_, 3};
@@ -45,6 +47,8 @@ private:
     static esp_err_t logout(httpd_req_t* request);
     static esp_err_t get_settings(httpd_req_t* request);
     static esp_err_t set_settings(httpd_req_t* request);
+    static esp_err_t get_buzzer(httpd_req_t* request);
+    static esp_err_t set_buzzer(httpd_req_t* request);
     static void apply_wifi(void* context);
     Session* find_session(httpd_req_t* request) noexcept;
     bool authorized(httpd_req_t* request) noexcept;
@@ -52,6 +56,7 @@ private:
     AccessSettings& settings_;
     WifiAp* wifi_ = nullptr;
     ZigbeeControl* zigbee_ = nullptr;
+    BuzzerSettings* buzzer_ = nullptr;
     httpd_handle_t server_ = nullptr;
     char ap_mac_[18]{};
     std::array<Session, 4> sessions_{};

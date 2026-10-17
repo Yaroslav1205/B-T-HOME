@@ -16,6 +16,11 @@ bool text(const char* value, std::size_t min, std::size_t max, bool ascii) noexc
 bool valid_wifi(const WifiSettings& wifi) noexcept {
     return text(wifi.ssid, 1, 32, false) && text(wifi.password, 8, 63, true);
 }
+bool valid_station(const WifiSettings& wifi) noexcept {
+    if (!wifi.ssid[0]) return !wifi.password[0];
+    return text(wifi.ssid, 1, 32, false) &&
+        (!wifi.password[0] || text(wifi.password, 8, 63, true));
+}
 bool valid_username(const char* value) noexcept { return text(value, 1, 32, true); }
 bool valid_web_password(const char* value) noexcept { return text(value, 1, 63, false); }
 bool same_wifi(const WifiSettings& a, const WifiSettings& b) noexcept {
@@ -43,7 +48,8 @@ Status AccessSettings::init() noexcept {
         if (result == Status::ok) { result = store_.save(config_); }
         if (result != Status::ok) { return result; }
     }
-    if (config_.version != 1 || !valid_wifi(config_.wifi) || !valid_username(config_.web.username)) {
+    if (config_.version != 2 ||
+        !valid_station(config_.stations[0]) || !valid_station(config_.stations[1]) || !valid_wifi(config_.wifi) || !valid_username(config_.web.username)) {
         return Status::invalid_argument;
     }
     ready_ = true;
@@ -55,14 +61,18 @@ bool AccessSettings::authenticate(const char* username, const char* password) no
     return matches && std::strcmp(username, config_.web.username) == 0;
 }
 Status AccessSettings::update(const WifiSettings& wifi, const char* username,
-                              const char* new_password, bool& credentials_changed) noexcept {
+                              const char* new_password, bool& credentials_changed,
+                              const std::array<WifiSettings, 2>* stations) noexcept {
     credentials_changed = false;
     if (!ready_) { return Status::invalid_state; }
     if (!valid_wifi(wifi) || !valid_username(username) || !new_password ||
         (new_password[0] && !valid_web_password(new_password))) {
         return Status::invalid_argument;
     }
+    if (stations && (!valid_station((*stations)[0]) || !valid_station((*stations)[1])))
+        return Status::invalid_argument;
     auto candidate = config_;
+    if (stations) candidate.stations = *stations;
     candidate.wifi = wifi;
     std::snprintf(candidate.web.username, sizeof(candidate.web.username), "%s", username);
     const bool new_login = std::strcmp(config_.web.username, username) != 0 || new_password[0];
@@ -70,7 +80,9 @@ Status AccessSettings::update(const WifiSettings& wifi, const char* username,
         const auto result = codec_.create(new_password, candidate.web);
         if (result != Status::ok) { return result; }
     }
-    if (!new_login && same_wifi(config_.wifi, wifi)) { return Status::ok; }
+    if (!new_login && same_wifi(config_.wifi, wifi) &&
+        same_wifi(config_.stations[0], candidate.stations[0]) &&
+        same_wifi(config_.stations[1], candidate.stations[1])) { return Status::ok; }
     const auto result = store_.save(candidate);
     if (result != Status::ok) {
         // Failed commit can have uncertain durability. Fail closed until restart.

@@ -121,8 +121,9 @@ Zigbee-атрибут звіряється зі станом виходу кож
 - SDK зафіксовано як `espressif/esp-zigbee-lib 2.0.4` у `main/idf_component.yml`.
   Component Manager завантажує його для ESP32-C6 у `managed_components/`.
 - `boards/esp32c6_rgb8/partitions.csv`: звичайний NVS залишається на `0x9000`,
-  застосунок на `0x10000` збільшено до 2 МБ, `zb_storage` — окремий NVS на
-  `0x210000`, 64 КБ. Профіль використовує підтверджені 4 МБ flash.
+  `ota_0` починається на `0x10000`, `ota_1` — на `0x220000`, кожен по 1,875 MiB.
+  `zb_storage` — окремий NVS на `0x210000`, 64 КБ. Профіль використовує
+  підтверджені 4 МБ flash. [Перехід на OTA та повна таблиця](OTA.md).
 - Наявні `build/<profile>/sdkconfig` потрібно також оновити: defaults їх не
   перезаписують. Оновлено конфігурації звичайної збірки й VS Code цього workspace.
 

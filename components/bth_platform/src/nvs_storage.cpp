@@ -38,6 +38,21 @@ Status NvsRelayStore::save(bool on) noexcept {
     if (result != ESP_OK) { return check(result); }
     return check(nvs_commit(handle_));
 }
+Status NvsRelayStore::load_mode(RelayMode& mode) noexcept {
+    if (!handle_) return Status::invalid_state;
+    uint8_t value = 1;
+    const auto result = nvs_get_u8(handle_, "mode", &value);
+    if (result != ESP_OK && result != ESP_ERR_NVS_NOT_FOUND) return check(result);
+    if (value > 2) return Status::invalid_argument;
+    mode = static_cast<RelayMode>(value);
+    return Status::ok;
+}
+Status NvsRelayStore::save_mode(RelayMode mode) noexcept {
+    if (!handle_) return Status::invalid_state;
+    if (static_cast<unsigned>(mode) > 2) return Status::invalid_argument;
+    const auto result = nvs_set_u8(handle_, "mode", static_cast<uint8_t>(mode));
+    return result == ESP_OK ? check(nvs_commit(handle_)) : check(result);
+}
 void NvsRelayStore::deinit() noexcept {
     if (handle_) { nvs_close(handle_); handle_ = 0; }
 }

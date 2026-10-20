@@ -1,6 +1,9 @@
 #include "application.hpp"
+#include "bth/platform/outage_settings.hpp"
+#include "bth/platform/outage_service.hpp"
 #include "bth/platform/esp_buzzer.hpp"
 #include "bth/platform/buzzer_settings.hpp"
+#include "bth/platform/battery_settings.hpp"
 #include "bth/platform/esp_mains.hpp"
 #include "bth/platform/battery_store.hpp"
 
@@ -22,6 +25,8 @@
 #include "esp_mac.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"
+#include <cstring>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
@@ -53,8 +58,8 @@ static_assert((board::mains_adc_gpio < 0 && board::boot_button_gpio < 0 && board
 class MainsOutputs final : public MainsSink {
 public:
     MainsOutputs(MainsSink& log, MainsSink& display, MainsSink* web, MainsSink* matter,
-                 MainsSink* battery, MainsSink* buzzer)
-        : log_(log), display_(display), web_(web), matter_(matter), battery_(battery), buzzer_(buzzer) {}
+                 MainsSink* battery, MainsSink* buzzer, MainsSink* relay)
+        : log_(log), display_(display), web_(web), matter_(matter), battery_(battery), buzzer_(buzzer), relay_(relay) {}
     void report(const MainsReading& reading) noexcept override {
         if (voltage_console_enabled) log_.report(reading);
         display_.report(reading);
@@ -62,6 +67,7 @@ public:
         if (matter_) matter_->report(reading);
         if (battery_) battery_->report(reading);
         if (buzzer_) buzzer_->report(reading);
+        if (relay_) relay_->report(reading);
     }
 private:
     MainsSink& log_;
@@ -70,6 +76,7 @@ private:
     MainsSink* matter_;
     MainsSink* battery_;
     MainsSink* buzzer_;
+    MainsSink* relay_;
 };
 
 class DcOutput final : public DcSink {
@@ -152,6 +159,12 @@ void run() {
     StartupBlinkModule startup_blink(startup_led, blink_config);
 #if CONFIG_BTH_WEB_RELAY_ENABLED
     NvsStorage storage;
+#if !CONFIG_BTH_MATTER_ENABLED
+    NvsOutageSettings outage_settings;
+#endif
+    NvsBatterySettings battery_settings;
+    constexpr bool battery_enabled = board::mains_adc_gpio >= 0 && board::dc_adc_gpio >= 0;
+    BatterySettings* web_battery = battery_enabled ? &battery_settings : nullptr;
     NvsBuzzerSettings buzzer_settings;
     BuzzerSettings* web_buzzer = board::buzzer_gpio >= 0 ? &buzzer_settings : nullptr;
     NvsRelayStore relay_store;
@@ -170,7 +183,7 @@ void run() {
     static_assert(board::relay_gpio >= 0 && board::boot_button_gpio >= 0, "Matter requires relay and BOOT GPIOs");
     MatterModule matter(relay_service);
     MatterVoltageOutputs matter_voltages(matter);
-    RelayWeb web(relay_service, access, web_buzzer);
+    RelayWeb web(relay_service, access, web_buzzer, web_battery);
     BootButton boot_button(board::boot_button_gpio, board::boot_button_active_low);
 #elif CONFIG_BTH_ZIGBEE_ENABLED
     WifiAp wifi(access);
@@ -178,12 +191,16 @@ void run() {
     static_assert(board::boot_button_gpio >= 0, "Zigbee/Wi-Fi mode selection requires a confirmed BOOT GPIO");
     ZigbeeModule zigbee(relay_service);
     // The configuration AP never shares the radio with Zigbee.
-    RelayWeb web(relay_service, access, wifi, nullptr, web_buzzer);
+    OtaService ota;
+    RelayWeb web(relay_service, access, wifi, nullptr, web_buzzer, web_battery, &outage_settings,
+                 std::strcmp(board::id, "esp32c6_rgb8") == 0 ? &ota : nullptr);
     RadioMode radio(zigbee, wifi, web, wifi, access_store);
     BootButton boot_button(board::boot_button_gpio, board::boot_button_active_low);
 #else
     WifiAp wifi(access);
-    RelayWeb web(relay_service, access, wifi, nullptr, web_buzzer);
+    OtaService ota;
+    RelayWeb web(relay_service, access, wifi, nullptr, web_buzzer, web_battery, &outage_settings,
+                 std::strcmp(board::id, "esp32c6_rgb8") == 0 ? &ota : nullptr);
 #endif
     MainsSink* web_mains = &web;
     DcSink* web_dc = &web;
@@ -216,9 +233,8 @@ void run() {
                     );
 #if CONFIG_BTH_WEB_RELAY_ENABLED
     NvsBatteryStore battery_store;
-    static constexpr const char* battery_providers[] = {"nvs", "mains", "dc"};
-    BatteryModule battery(battery_store, oled, {12000, 58000, 1500, 10.5}, {battery_providers, 3});
-    constexpr bool battery_enabled = board::mains_adc_gpio >= 0 && board::dc_adc_gpio >= 0;
+    static constexpr const char* battery_providers[] = {"nvs", "mains", "dc", "battery_settings"};
+    BatteryModule battery(battery_store, oled, {12000, 58000, 1500, 10.5}, {battery_providers, 4});
     MainsSink* battery_mains = battery_enabled ? &battery : nullptr;
     DcSink* battery_dc = battery_enabled ? &battery : nullptr;
 #else
@@ -230,16 +246,38 @@ void run() {
     EspBuzzer buzzer_output(board::buzzer_gpio, board::buzzer_active_high);
     BuzzerModule buzzer(buzzer_output);
     MainsOutputs mains_outputs(mains_sink, oled, web_mains, matter_mains, battery_mains,
-                               board::buzzer_gpio >= 0 ? &buzzer : nullptr);
+                               board::buzzer_gpio >= 0 ? &buzzer : nullptr,
+#if CONFIG_BTH_WEB_RELAY_ENABLED
+                               &relay_service
+#else
+                               nullptr
+#endif
+                               );
     MainsModule mains(mains_input, mains_outputs, CONFIG_BTH_MAINS_MILLIVOLTS_PER_COUNT / 1000.0);
     DcOutput dc_output(oled, web_dc, matter_dc, battery_dc);
     static constexpr const char* adc_provider[] = {"mains"};
     DcModule dc(mains_input, dc_output,
                 board::dc_divider_ratio * CONFIG_BTH_DC_CALIBRATION_PERMILLE / 1000.0,
                 {adc_provider, 1});
+#if CONFIG_BTH_WEB_RELAY_ENABLED && !CONFIG_BTH_MATTER_ENABLED
+    static constexpr const char* outage_providers[] = {"outage_settings",
+#if CONFIG_BTH_ZIGBEE_ENABLED
+        "radio"
+#else
+        "wifi"
+#endif
+    };
+    OutageService outages(outage_settings, {outage_providers, 2});
+#endif
     Runtime runtime;
 #if CONFIG_BTH_WEB_RELAY_ENABLED
     if (runtime.add(storage) != Status::ok) { log_failure(runtime); return; }
+#if !CONFIG_BTH_MATTER_ENABLED
+    if (runtime.add(outage_settings) != Status::ok) { log_failure(runtime); return; }
+#endif
+    if constexpr (battery_enabled) {
+        if (runtime.add(battery_settings) != Status::ok) { log_failure(runtime); return; }
+    }
     if constexpr (board::buzzer_gpio >= 0) {
         if (runtime.add(buzzer_settings) != Status::ok) { log_failure(runtime); return; }
     }
@@ -288,6 +326,9 @@ void run() {
         }
     }
 #endif
+#if CONFIG_BTH_WEB_RELAY_ENABLED && !CONFIG_BTH_MATTER_ENABLED
+    if (runtime.add(outages) != Status::ok) { log_failure(runtime); return; }
+#endif
     if constexpr (board::led_gpio >= 0) {
         if (runtime.add(startup_blink) != Status::ok) {
             log_failure(runtime);
@@ -311,6 +352,11 @@ void run() {
     ESP_LOGI(tag, "BOOT: short=AP/STA/Zigbee, hold 3s and release=Zigbee pairing");
 #endif
 
+    const auto boot_check_at = esp_timer_get_time() + 30000000;
+    bool boot_confirmed = false;
+#if CONFIG_BTH_WEB_RELAY_ENABLED && !CONFIG_BTH_MATTER_ENABLED
+    std::uint64_t ota_reboot_at = 0;
+#endif
     const TickType_t delay_ticks = pdMS_TO_TICKS(CONFIG_BTH_LOOP_INTERVAL_MS);
 #if CONFIG_BTH_MATTER_ENABLED
     std::uint64_t next_ip_ms = 0;
@@ -340,13 +386,24 @@ void run() {
             radio.selection() == RadioSelection::station ? 2 :
             zigbee.snapshot().state == ZigbeeState::joining ? 8 : 3);
 #endif
+#if CONFIG_BTH_WEB_RELAY_ENABLED && !CONFIG_BTH_MATTER_ENABLED
+        ota.connected(wifi.station_mode() && wifi.connected());
+        outages.connected(wifi.station_mode() && wifi.connected());
+        oled.report_outages(outages.display());
+#endif
         if (runtime.tick(now_ms) != Status::ok) {
             log_failure(runtime);
             // Runtime has already stopped and deinitialized all modules.
             return;
         }
 #if CONFIG_BTH_WEB_RELAY_ENABLED
+        web.report_display(oled.readings(now_ms), now_ms);
         if constexpr (battery_enabled) {
+            if (battery.set_discharge_ma(battery_settings.discharge_ma()) != Status::ok) {
+                ESP_LOGE(tag, "Invalid battery discharge current");
+                runtime.stop();
+                return;
+            }
             const auto saved = battery.service();
             if (saved != Status::ok) {
                 ESP_LOGE(tag, "Battery checkpoint failed: %s", status_name(saved));
@@ -365,18 +422,34 @@ void run() {
         matter.service_pairing();
 #elif CONFIG_BTH_ZIGBEE_ENABLED
         const auto action = boot_button.take_action();
-        if (action == ButtonAction::pair) {
+        if (action == ButtonAction::pair && !ota.busy() && !ota.reboot_requested()) {
             // Joins radio workers outside tick; providers and measurements stay alive.
+            outages.stop();
             const auto result = radio.toggle();
             if (result != Status::ok) {
                 ESP_LOGE(tag, "Radio mode switch failed: %s", status_name(result));
                 runtime.stop();
                 return;
             }
+            if (outages.start() != Status::ok) { runtime.stop(); return; }
             ESP_LOGI(tag, "Mode: %s", radio.selection() == RadioSelection::ap ? "Wi-Fi AP | http://192.168.4.1" :
                 radio.selection() == RadioSelection::station ? "Wi-Fi client" : "Zigbee");
         } else if (action == ButtonAction::toggle_mode && !radio.configuration_mode()) {
             ESP_LOGI(tag, "BOOT pairing: %s", zigbee.request(ZigbeeCommand::join) ? "queued" : "busy");
+        }
+#endif
+        if (!boot_confirmed && esp_timer_get_time() >= boot_check_at) {
+            if (!OtaService::confirm_boot()) {
+                ESP_LOGE(tag, "Cannot confirm OTA image; rollback remains pending until reset");
+                runtime.stop();
+                return;
+            }
+            boot_confirmed = true;
+        }
+#if CONFIG_BTH_WEB_RELAY_ENABLED && !CONFIG_BTH_MATTER_ENABLED
+        if (ota.reboot_requested()) {
+            if (!ota_reboot_at) ota_reboot_at = now_ms + 2000;
+            if (now_ms >= ota_reboot_at) { runtime.stop(); esp_restart(); }
         }
 #endif
         vTaskDelay(delay_ticks > 0 ? delay_ticks : 1);

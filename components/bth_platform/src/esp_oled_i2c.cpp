@@ -1,10 +1,13 @@
 #include "bth/platform/esp_oled_i2c.hpp"
 #include "driver/gpio.h"
 #include "esp_log.h"
-#include <algorithm>
 
 namespace bth {
 namespace {
+// ESP-IDF task stack sizes are bytes. Both frame buffers remain live while
+// I2C error logging enters newlib/USB console code. 3072 bytes overflowed on
+// ESP32-C6 in that path; reserve headroom for driver recovery and logging.
+constexpr unsigned oled_stack_bytes = 8192;
 Status checked(esp_err_t result, const char* operation) noexcept {
     if (result == ESP_OK) { return Status::ok; }
     ESP_LOGE("oled", "%s: %s", operation, esp_err_to_name(result));
@@ -38,61 +41,50 @@ Status EspOledI2c::init() noexcept {
     return updates_ && joined_ ? Status::ok : Status::no_memory;
 }
 
-Status EspOledI2c::probe(bool& present) noexcept {
-    present = false;
-    if (!bus_ || !device_) { return Status::invalid_state; }
-    const auto result = i2c_master_probe(bus_, config_.address, 100);
-    if (result == ESP_ERR_NOT_FOUND || result == ESP_ERR_TIMEOUT) {
-        ESP_LOGW("oled", "No response at 0x%02x; continuing without OLED (%s)",
-                 static_cast<unsigned>(config_.address), esp_err_to_name(result));
-        return Status::ok;
-    }
-    if (result != ESP_OK) { return checked(result, "probe SSD1306"); }
-    present = true;
-    ESP_LOGI("oled", "Display detected at 0x%02x", static_cast<unsigned>(config_.address));
-    return Status::ok;
+Status EspOledI2c::recover_bus() noexcept {
+    if (!bus_) return Status::invalid_state;
+    // The worker is the only bus user. ESP-IDF 5.4 resets the controller and
+    // performs bounded clock/STOP bus clearing; no GPIO ownership changes here.
+    return checked(i2c_master_bus_reset(bus_), "recover I2C bus");
 }
 
 Status EspOledI2c::write(const std::uint8_t* bytes, std::size_t size) noexcept {
     if (!device_) { return Status::invalid_state; }
     if (!bytes || size == 0) { return Status::invalid_argument; }
-    // A frame needs about 47 ms at 100 kHz: lifecycle or worker only, never tick.
-    return checked(i2c_master_transmit(device_, bytes, size, 100), "write SSD1306");
+    // A frame needs about 93 ms at 50 kHz. Leave scheduling/driver headroom;
+    // the bounded wait stays in the worker, never Runtime.
+    return checked(i2c_master_transmit(device_, bytes, size, 200), "write SSD1306");
 }
 
 Status EspOledI2c::start_updates() noexcept {
     if (!device_ || !updates_ || !joined_ || task_) return Status::invalid_state;
     xQueueReset(updates_);
     update_status_.store(Status::ok);
-    return xTaskCreate(worker, "oled", 3072, this, 2, &task_) == pdPASS
+    return xTaskCreate(worker, "oled", oled_stack_bytes, this, 1, &task_) == pdPASS
         ? Status::ok : Status::no_memory;
 }
 
-Status EspOledI2c::submit(const OledFrame& frame) noexcept {
+Status EspOledI2c::submit(const OledUpdate& display) noexcept {
     if (!task_) return Status::invalid_state;
     const auto status = poll();
-    if (status != Status::ok) return status;
-    const Update update{frame, false};
+    if (status != Status::ok && status != Status::hardware_error) return status;
+    const Update update{display, false};
     return xQueueOverwrite(updates_, &update) == pdPASS ? Status::ok : Status::internal_error;
 }
 
 void EspOledI2c::worker(void* context) {
     auto& self = *static_cast<EspOledI2c*>(context);
+    OledWriter writer(self);
     Update update;
     while (xQueueReceive(self.updates_, &update, portMAX_DELAY) == pdTRUE) {
         if (update.stop) break;
-        if (self.poll() != Status::ok) continue;
-        // Reset the address window for every complete frame.
-        const std::uint8_t window[] = {0x00, 0x21, 0x00, 0x7f, 0x22, 0x00, 0x03};
-        auto status = self.write(window, sizeof(window));
-        if (status == Status::ok) {
-            std::array<std::uint8_t, 513> data{};
-            data[0] = 0x40;
-            std::copy(update.frame.begin(), update.frame.end(), data.begin() + 1);
-            status = self.write(data.data(), data.size());
-        }
+        const auto previous = self.poll();
+        const auto status = writer.send(update.display);
+        if (previous == Status::hardware_error && status == Status::ok)
+            ESP_LOGI("oled", "Display recovered");
         self.update_status_.store(status);
     }
+    writer.off();
     xSemaphoreGive(self.joined_);
     vTaskDelete(nullptr);
 }

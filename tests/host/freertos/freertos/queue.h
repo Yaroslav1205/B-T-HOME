@@ -7,4 +7,5 @@ BaseType_t xQueueSend(QueueHandle_t queue, const void* item, TickType_t wait);
 BaseType_t xQueueReceive(QueueHandle_t queue, void* item, TickType_t wait);
 BaseType_t xQueuePeek(QueueHandle_t queue, void* item, TickType_t wait);
 BaseType_t xQueueOverwrite(QueueHandle_t queue, const void* item);
+BaseType_t xQueueReset(QueueHandle_t queue);
 void vQueueDelete(QueueHandle_t queue);

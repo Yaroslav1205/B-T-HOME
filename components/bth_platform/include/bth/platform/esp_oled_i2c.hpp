@@ -18,21 +18,21 @@ struct OledI2cConfig {
     bool internal_pullups;
 };
 
-class EspOledI2c final : public OledTransport {
+class EspOledI2c final : public OledTransport, private OledIo {
 public:
     explicit EspOledI2c(OledI2cConfig config) noexcept : config_(config) {}
     EspOledI2c(const EspOledI2c&) = delete;
     EspOledI2c& operator=(const EspOledI2c&) = delete;
     Status init() noexcept override;
-    Status probe(bool& present) noexcept override;
-    Status write(const std::uint8_t* bytes, std::size_t size) noexcept override;
     Status start_updates() noexcept override;
-    Status submit(const OledFrame& frame) noexcept override;
+    Status submit(const OledUpdate& update) noexcept override;
     Status poll() noexcept override { return update_status_.load(); }
     void stop_updates() noexcept override;
     void deinit() noexcept override;
 private:
-    struct Update { OledFrame frame{}; bool stop = false; };
+    Status write(const std::uint8_t* bytes, std::size_t size) noexcept override;
+    Status recover_bus() noexcept override;
+    struct Update { OledUpdate display{}; bool stop = false; };
     static void worker(void* context);
     const OledI2cConfig config_;
     i2c_master_bus_handle_t bus_ = nullptr;

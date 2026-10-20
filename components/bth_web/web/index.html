@@ -36,9 +36,9 @@ button:hover{background:var(--accent-hover)}button.off{background:var(--secondar
 footer{font-size:12px;line-height:1.6;color:var(--muted);margin:20px 8px}noscript{display:block;color:var(--error);margin-top:20px}
 [hidden]{display:none!important}article+article{margin-top:18px}
 form{display:grid;gap:14px}label{font-size:13px;color:var(--muted);display:grid;gap:6px}
-input{width:100%;border:1px solid var(--input-border);border-radius:10px;padding:12px;font:16px system-ui;background:var(--surface);color:var(--text)}
+input,select{width:100%;min-width:0;border:1px solid var(--input-border);border-radius:10px;padding:12px;font:16px system-ui;background:var(--surface);color:var(--text)}
 label:has(input[type=checkbox]){display:flex;align-items:center;gap:8px}input[type=checkbox]{width:18px;height:18px;padding:0}
-input:focus{outline:2px solid var(--focus);outline-offset:1px}h2{font-size:22px;margin:0 0 20px}
+input:focus,select:focus{outline:2px solid var(--focus);outline-offset:1px}h2{font-size:22px;margin:0 0 20px}
 small{color:var(--muted);font-size:12px;line-height:1.5}fieldset{border:0;padding:0;margin:0;display:grid;gap:14px}
 summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
 #logout{width:auto;padding:7px 10px;font-size:12px;margin-left:8px;background:transparent;color:var(--muted)}
@@ -51,6 +51,7 @@ summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
 .voltages dt{font-size:13px;color:var(--muted);margin-bottom:8px}.voltages dd{margin:0}
 .voltage-value{display:block;font-size:30px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
 .voltage-status{display:block;font-size:12px;color:var(--muted);margin-top:6px;min-height:32px}
+.voltages .wide{grid-column:1/-1}.reading-value{font-size:18px;font-weight:600;overflow-wrap:anywhere}
 .device-info{margin:0}.device-info dt{font-size:13px;color:var(--muted);margin-bottom:8px}.device-info dd{margin:0;font-family:ui-monospace,monospace;font-size:16px;overflow-wrap:anywhere;user-select:all}
 @media(max-width:380px){body{padding:16px}article{padding:24px}}
 </style>
@@ -75,17 +76,33 @@ summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
 <dl class="device-info"><dt id="deviceMacLabel">MAC-адреса Wi-Fi (точка доступу)</dt><dd id="deviceMac">—</dd></dl>
 <p id="matterInfo" hidden><small>Matter через домашній Wi-Fi. Для сполучення натисніть BOOT; код показується в USB-терміналі.</small></p>
 </article>
+
 <article aria-labelledby="voltageHeading">
-<h2 id="voltageHeading">Напруга</h2>
+<h2 id="voltageHeading">Показники</h2>
 <dl class="voltages">
 <div><dt>Мережа</dt><dd><span id="mainsVoltage" class="voltage-value">—</span><span id="mainsStatus" class="voltage-status">Очікуємо вимірювання</span></dd></div>
 <div><dt>Батарея</dt><dd><span id="batteryVoltage" class="voltage-value">—</span><span id="batteryStatus" class="voltage-status">Очікуємо вимірювання</span></dd></div>
+<div><dt>Середня напруга мережі</dt><dd><span id="averageVoltage" class="voltage-value">—</span><span class="voltage-status">Останні 60 вимірів за наявності мережі</span></dd></div>
+<div><dt>Залишок автономності</dt><dd><span id="batteryRemaining" class="voltage-value">—</span><span id="remainingStatus" class="voltage-status">Очікуємо вимірювання</span></dd></div>
+<div><dt>Реле</dt><dd><span id="readingRelay" class="reading-value">—</span></dd></div>
+<div><dt>IP-адреса</dt><dd><span id="readingIp" class="reading-value">—</span></dd></div>
+<div class="wide"><dt>Планове відключення · <span id="readingGroup">група —</span></dt><dd><span id="readingOutage" class="reading-value">—</span><span class="voltage-status">Поточний або найближчий інтервал сьогодні</span></dd></div>
 <div><dt>Основне живлення зараз</dt><dd><span id="currentDuration" class="voltage-value">—</span><span id="currentPower" class="voltage-status">Очікуємо вимірювання</span></dd></div>
 <div><dt>Попередній період</dt><dd><span id="previousDuration" class="voltage-value">—</span><span id="previousPower" class="voltage-status">Ще немає даних</span></dd></div>
 </dl>
 </article>
-<article aria-labelledby="state">
-<p class="label">Керування реле</p>
+<article aria-labelledby="relayHeading">
+<details id="relayPanel"><summary id="relayHeading">Керування реле</summary>
+<form id="relayModeForm">
+<label>Режим роботи реле<select id="relayMode" disabled>
+<option value="0">0 — Не використовується</option>
+<option value="1">1 — Керування з браузера</option>
+<option value="2">2 — Увімкнення при відсутності мережі</option>
+</select></label>
+<button id="saveRelayMode" type="submit" disabled>Зберегти режим</button>
+<small>Режим 0 тримає реле вимкненим. Режим 2 вмикає його за підтвердженої відсутності мережі; після повернення мережі або втрати достовірних вимірів вимикає. Налаштування зберігається після перезапуску.</small>
+<p id="relayModeMessage" role="status"></p>
+</form>
 <h1 id="state" aria-live="polite">Завантаження…</h1>
 <p id="detail">Отримуємо стан від пристрою.</p>
 <button id="toggle" type="button" aria-label="Керування реле" aria-describedby="state" disabled>
@@ -93,6 +110,7 @@ summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
 </button>
 <p id="message" role="status" aria-live="polite"></p>
 <noscript>Увімкніть JavaScript, щоб керувати реле.</noscript>
+</details>
 </article>
 <article hidden>
 <details id="zigbeePanel" hidden><summary>Zigbee</summary>
@@ -107,12 +125,30 @@ summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
 </details>
 </article>
 <article>
+<details id="outagePanel"><summary>Графік відключень</summary>
+<form id="outageForm"><fieldset id="outageFields" disabled>
+<label>Група Чернівціобленерго<input id="outageGroup" type="number" min="0" max="12" step="1" required inputmode="numeric" aria-describedby="outageHelp"></label>
+<small id="outageHelp">1–12 — ваша група; 0 — вимкнути запити й показ. Типово 2. Оновлення кожні 5 хвилин при підключенні до роутера. На OLED — поточний або найближчий плановий інтервал відключення сьогодні. Джерело — офіційний канал Чернівціобленерго. Аварійні відключення можуть відрізнятися від графіка.</small>
+<button type="submit">Зберегти групу</button>
+</fieldset><p id="outageMessage" class="feedback" role="status"></p></form>
+</details>
+</article>
+<article>
 <details id="buzzerPanel"><summary>Звуковий сигнал</summary>
 <form id="buzzerForm"><fieldset id="buzzerFields" disabled>
 <label>Інтервал нагадування, секунд<input id="buzzerInterval" type="number" min="0" max="86400" step="1" required inputmode="numeric" aria-describedby="buzzerHelp"></label>
 <small id="buzzerHelp">0 — без звуку. Від 1 до 86400 — короткий сигнал при зникненні мережі та повторення через заданий інтервал. Налаштування зберігається після вимкнення живлення.</small>
 <button type="submit">Зберегти інтервал</button>
 </fieldset><p id="buzzerMessage" class="feedback" role="status"></p></form>
+</details>
+</article>
+<article>
+<details id="batteryPanel"><summary>Розрахунок автономності</summary>
+<form id="batteryForm"><fieldset id="batteryFields" disabled>
+<label>Струм споживання, мА<input id="batteryCurrent" type="number" min="1" max="100000" step="1" required inputmode="numeric" aria-describedby="batteryHelp"></label>
+<small id="batteryHelp">Середній струм від акумулятора: 1000 мА = 1 А. Типово 58 мА. Впливає на прогноз часу та подальший облік розряду. Зберігається після вимкнення живлення; залишок заряду не скидається.</small>
+<button type="submit">Зберегти струм</button>
+</fieldset><p id="batteryMessage" class="feedback" role="status"></p></form>
 </details>
 </article>
 <article>
@@ -148,6 +184,16 @@ summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
 </fieldset><p id="routerMessage" class="feedback" role="status"></p></form>
 </details>
 </article>
+<article id="otaCard" aria-labelledby="otaHeading">
+<details><summary id="otaHeading">Оновлення прошивки</summary>
+<p>Встановлена версія: <strong id="otaCurrent">—</strong></p>
+<p><small>Оновлення з GitHub через Wi-Fi роутера. Після встановлення пристрій перезапуститься.</small></p>
+<button id="otaCheck" type="button" disabled>Перевірити оновлення</button>
+<p><button id="otaInstall" type="button" disabled>Оновити прошивку</button></p>
+<progress id="otaProgress" max="100" value="0" aria-label="Завантаження прошивки" hidden style="width:100%"></progress>
+<p id="otaMessage" class="feedback" role="status" aria-live="polite">Отримуємо стан оновлення…</p>
+</details>
+</article>
 </section>
 
 </main>
@@ -174,16 +220,39 @@ const button=element('toggle'),title=element('state'),detail=element('detail');
 const connection=element('connection'),message=element('message');
 const app=element('app'),loginCard=element('loginCard'),notice=element('notice');
 let current=null,busy=false,changing=false,signedIn=false;
+let displayExpiry=0;
 const voltageExpiry={mains:0,battery:0};
 const voltageLabels={waiting:'Очікуємо вимірювання',uncalibrated:'Потрібне калібрування',invalid:'Недійсне вимірювання',stale:'Немає свіжих даних'};
 function clearVoltages(text='Очікуємо вимірювання'){
+  clearDisplay(text);
   clearPeriods(text);
   for(const key of ['mains','battery']){element(key+'Voltage').textContent='—';element(key+'Status').textContent=text;voltageExpiry[key]=0;}
 }
 function clearPeriods(text='Ще немає даних'){
   for(const key of ['current','previous']){element(key+'Duration').textContent='—';element(key+'Power').textContent=text;}
 }
+function clearDisplay(text='Немає свіжих даних'){
+  displayExpiry=0;
+  for(const id of ['averageVoltage','batteryRemaining','readingRelay','readingIp','readingOutage'])element(id).textContent='—';
+  element('remainingStatus').textContent=text;element('readingGroup').textContent='група —';
+}
+function showDisplay(d){
+  clearDisplay();
+  if(!d||!Number.isFinite(d.age_ms)||d.age_ms<0||d.age_ms>=2500)return;
+  displayExpiry=Date.now()+2500-d.age_ms;
+  element('averageVoltage').textContent=Number.isFinite(d.average_volts)?d.average_volts.toFixed(1)+' V':'—';
+  const time=minutes=>String(Math.floor(minutes/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0');
+  const valid=Number.isInteger(d.battery_minutes)&&d.battery_minutes>=0;
+  element('batteryRemaining').textContent=valid?(d.battery_minutes>5999?'>99:59':time(d.battery_minutes)):'—';
+  element('remainingStatus').textContent=d.mains_present?'Живлення від мережі':valid?'Приблизно · год:хв':'Оцінка недоступна';
+  element('readingRelay').textContent=typeof d.relay_on==='boolean'?(d.relay_on?'Увімкнено':'Вимкнено'):'—';
+  element('readingIp').textContent=d.ipv4||'—';
+  element('readingGroup').textContent=d.outage_group?'група '+d.outage_group:'група —';
+  const states={hidden:'Графік вимкнено',unavailable:'Немає графіка на сьогодні',stale:'Дані застарілі',clear:'Відключень до кінця дня немає'};
+  element('readingOutage').textContent=d.outage_state==='interval'?time(d.outage_begin)+'–'+time(d.outage_end):(states[d.outage_state]||'—');
+}
 function showVoltages(data){
+  showDisplay(data.display);
   for(const key of ['mains','battery']){
     const reading=data[key];
     const valid=reading&&reading.status==='ok'&&typeof reading.volts==='number'&&Number.isFinite(reading.volts)&&reading.volts>=0&&
@@ -210,6 +279,7 @@ async function loadVoltages(){
   }catch{clearVoltages('Немає зв’язку з вимірюваннями');}
 }
 setInterval(()=>{
+  if(displayExpiry&&Date.now()>=displayExpiry)clearDisplay();
   for(const key of ['mains','battery'])if(voltageExpiry[key]&&Date.now()>=voltageExpiry[key]){
     if(key==='mains')clearPeriods(voltageLabels.stale);
     element(key+'Voltage').textContent='—';element(key+'Status').textContent=voltageLabels.stale;voltageExpiry[key]=0;
@@ -217,14 +287,33 @@ setInterval(()=>{
 },250);
 function notify(text){notice.textContent=text;notice.hidden=!text;}
 function showLogin(text=''){
+  element('outageFields').disabled=true;element('outageGroup').value='';
   element('buzzerFields').disabled=true;element('buzzerInterval').value='';
+  element('batteryFields').disabled=true;element('batteryCurrent').value='';
   clearZigbee();
   clearVoltages();
   signedIn=false;current=null;app.hidden=true;loginCard.hidden=false;element('logout').hidden=true;
   button.disabled=true;element('loginPassword').value='';element('loginMessage').textContent=text;
   connection.textContent='Потрібен вхід';connection.className='link';
 }
+let modeEditing=false,modeBusy=false;
+element('relayMode').addEventListener('change',()=>{modeEditing=true;});
+element('relayModeForm').addEventListener('submit',async event=>{
+  event.preventDefault();if(modeBusy)return;
+  modeBusy=true;element('saveRelayMode').disabled=true;
+  const feedback=element('relayModeMessage');feedback.textContent='Зберігаємо…';
+  try{
+    const result=await api('/api/relay-mode',mutation('PUT',{mode:Number(element('relayMode').value)}));
+    if(result.status===401){showLogin('Увійдіть повторно.');return;}
+    if(!result.ok)throw new Error('save_failed');
+    modeEditing=false;show(result.data);feedback.textContent='Режим збережено.';
+  }catch{feedback.textContent='Не вдалося підтвердити збереження. Перевірте стан пристрою.';}
+  finally{modeBusy=false;element('saveRelayMode').disabled=!current?.ready;element('relayMode').disabled=!current?.ready;if(current&&!modeEditing)element('relayMode').value=String(current.mode??1);}
+});
 function show(state){
+  if(!modeEditing&&!modeBusy)element('relayMode').value=String(state.mode??1);
+  element('relayMode').disabled=!state.ready||modeBusy;
+  element('saveRelayMode').disabled=!state.ready||modeBusy;
   element('deviceMacLabel').textContent=state.wifi_mode==='matter'?'MAC-адреса Wi-Fi (домашня мережа)':'MAC-адреса Wi-Fi (точка доступу)';
   element('matterInfo').hidden=state.wifi_mode!=='matter';
   element('deviceMac').textContent=typeof state.mac==='string'&&/^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(state.mac)?state.mac.toUpperCase():'—';
@@ -235,10 +324,11 @@ function show(state){
   detail.textContent=saved?'Стан збережено. Він відновиться після перезапуску.':'Не вдалося підтвердити збережений стан.';
   button.dataset.on=String(state.output_known&&state.on);
   button.setAttribute('aria-label',state.output_known?(state.on?'Вимкнути реле':'Увімкнути реле'):'Стан реле невідомий');
-  button.disabled=!state.ready||!state.output_known||changing;
+  button.disabled=!state.ready||!state.output_known||changing||(state.mode??1)!==1;
   if(!state.ready){message.className='error';message.textContent=state.error==='ok'?'Реле не налаштоване для цієї плати.':'Помилка пристрою. Керування недоступне.';}
 }
 function offline(){
+  element('relayMode').disabled=true;element('saveRelayMode').disabled=true;
   clearZigbee();
   clearVoltages('Немає зв’язку');
   current=null;connection.textContent='Немає зв’язку';connection.className='link';
@@ -299,6 +389,40 @@ async function zigbeeAction(action){
 }
 element('zigbeeJoin').addEventListener('click',()=>zigbeeAction('join'));
 element('zigbeeReset').addEventListener('click',()=>zigbeeAction('reset'));
+async function loadOutages(){
+  const feedback=element('outageMessage');
+  element('outageFields').disabled=true;
+  try{
+    const result=await api('/api/outages');
+    if(result.status===401){showLogin();return;}
+    if(!result.ok)throw new Error('outages');
+    element('outagePanel').parentElement.hidden=result.data.available===false;
+    if(result.data.available===false)return;
+    const group=result.data.group;
+    if(!Number.isInteger(group)||group<0||group>12)throw new Error('group');
+    if(!signedIn)return;
+    element('outageGroup').value=group;
+    element('outageFields').disabled=false;
+    feedback.className='feedback';feedback.textContent=group===0?'Графік вимкнено.':'Поточна група: '+group+'.';
+  }catch{feedback.className='feedback error';feedback.textContent='Не вдалося прочитати групу. Оновіть сторінку.';}
+}
+element('outageForm').addEventListener('submit',async event=>{
+  event.preventDefault();if(busy||!signedIn)return;
+  const input=element('outageGroup'),feedback=element('outageMessage'),group=Number(input.value);
+  if(input.value.trim()===''||!Number.isInteger(group)||group<0||group>12){
+    feedback.className='feedback error';feedback.textContent='Вкажіть ціле число від 0 до 12.';return;
+  }
+  busy=true;element('outageFields').disabled=true;
+  feedback.className='feedback';feedback.textContent='Зберігаємо…';
+  try{
+    const result=await api('/api/outages',mutation('PUT',{group}));
+    if(result.status===401){showLogin();return;}
+    if(!result.ok||result.data.group!==group)throw new Error('save');
+    input.value=result.data.group;
+    feedback.textContent=group===0?'Збережено. Запити й показ вимкнено.':'Збережено. Група: '+group+'. Оновиться після підключення до роутера.';
+  }catch{feedback.className='feedback error';feedback.textContent='Збереження не підтверджено. Оновіть сторінку й перевірте групу.';}
+  finally{busy=false;element('outageFields').disabled=!signedIn;}
+});
 async function loadBuzzer(){
   const feedback=element('buzzerMessage');
   element('buzzerFields').disabled=true;
@@ -336,6 +460,43 @@ element('buzzerForm').addEventListener('submit',async event=>{
     feedback.className='feedback error';feedback.textContent='Збереження не підтверджено. Оновіть сторінку й перевірте поточний інтервал.';
   }finally{busy=false;element('buzzerFields').disabled=!signedIn;}
 });
+async function loadBattery(){
+  const feedback=element('batteryMessage');
+  element('batteryFields').disabled=true;
+  try{
+    const result=await api('/api/battery');
+    if(result.status===401){showLogin();return;}
+    if(!result.ok)throw new Error('battery');
+    element('batteryPanel').parentElement.hidden=result.data.available===false;
+    if(result.data.available===false)return;
+    const milliamps=result.data.discharge_ma;
+    if(!Number.isInteger(milliamps)||milliamps<1||milliamps>100000)throw new Error('interval');
+    element('batteryCurrent').value=milliamps;
+    element('batteryFields').disabled=false;
+    feedback.className='feedback';feedback.textContent='Поточний струм: '+milliamps+' мА.';
+  }catch{
+    feedback.className='feedback error';feedback.textContent='Не вдалося прочитати струм. Оновіть сторінку.';
+  }
+}
+element('batteryForm').addEventListener('submit',async event=>{
+  event.preventDefault();if(busy||!signedIn)return;
+  const input=element('batteryCurrent'),feedback=element('batteryMessage');
+  const milliamps=Number(input.value);
+  if(input.value.trim()===''||!Number.isInteger(milliamps)||milliamps<1||milliamps>100000){
+    feedback.className='feedback error';feedback.textContent='Вкажіть ціле число від 1 до 100000 мА.';return;
+  }
+  busy=true;element('batteryFields').disabled=true;
+  feedback.className='feedback';feedback.textContent='Зберігаємо…';
+  try{
+    const result=await api('/api/battery',mutation('PUT',{discharge_ma:milliamps}));
+    if(result.status===401){showLogin();return;}
+    if(!result.ok||result.data.discharge_ma!==milliamps)throw new Error('save');
+    input.value=result.data.discharge_ma;
+    feedback.textContent='Збережено. Струм: '+milliamps+' мА.';
+  }catch{
+    feedback.className='feedback error';feedback.textContent='Збереження не підтверджено. Оновіть сторінку й перевірте поточний струм.';
+  }finally{busy=false;element('batteryFields').disabled=!signedIn;}
+});
 async function loadSettings(){
   const result=await api('/api/settings');
   if(result.status===401){showLogin();return;}
@@ -352,14 +513,66 @@ async function loadSettings(){
   element('primaryPassword').value='';element('backupPassword').value='';element('wifiPassword').value='';element('webPassword').value='';element('webPasswordConfirm').value='';
   if(result.data.wifi_pending)notify('Налаштування Wi-Fi збережені, але ще не застосовані. Перезапустіть пристрій.');
   await loadBuzzer();
+  await loadBattery();
+  await loadOutages();
 }
+let otaRequestPending=false;
+async function loadOta(){
+  if(!signedIn)return;
+  try{
+    const response=await api('/api/ota');
+    if(response.status===401){showLogin();return;}
+    if(!response.ok)throw new Error('ota');
+    const data=response.data;
+    element('otaCurrent').textContent=data.current_version||'—';
+    const active=otaRequestPending||data.busy||data.state==='restarting';
+    element('otaCheck').disabled=active||!data.supported||!data.connected;
+    element('otaInstall').disabled=active||!data.supported||!data.connected||data.state!=='available';
+    const progress=element('otaProgress');
+    progress.hidden=data.state!=='downloading';
+    progress.value=data.total>0?Math.min(100,Math.floor(100*data.received/data.total)):0;
+    const states={idle:'Натисніть «Перевірити оновлення».',checking:'Перевіряємо реліз на GitHub…',
+      available:'Доступна версія '+data.version+'.',up_to_date:'Новішої версії немає.',
+      downloading:'Завантаження: '+progress.value+'%. Не вимикайте живлення.',
+      restarting:'Прошивку перевірено. Перезапускаємо пристрій; потім увійдіть знову.'};
+    const errors={release_unavailable:'Не вдалося отримати сумісний реліз. Перевірте інтернет і наявність релізу на GitHub.',
+      cancelled:'Оновлення скасовано: з’єднання втрачено або час очікування минув.',
+      download_failed:'Завантаження обірвалося. Поточна прошивка збережена.',
+      checksum_failed:'Контрольна сума не збігається. Оновлення відхилено.',
+      invalid_image:'Образ прошивки несумісний або пошкоджений.',flash_failed:'Не вдалося записати прошивку.',
+      activation_failed:'Не вдалося вибрати нову прошивку для запуску.',clock_not_ready:'Очікуємо синхронізації часу. Спробуйте ще раз за хвилину.'};
+    const feedback=element('otaMessage');
+    feedback.className='feedback'+(data.state==='error'?' error':'');
+    feedback.textContent=!data.supported?'Для OTA потрібна початкова прошивка з новою таблицею розділів через USB.':
+      !data.connected?'Перемкніть пристрій у режим Wi-Fi-клієнта та підключіть до роутера з інтернетом.':
+      data.state==='error'?(errors[data.error]||'Оновлення не виконано. Спробуйте ще раз.'):(states[data.state]||'Очікуємо стан…');
+  }catch{
+    element('otaCheck').disabled=true;element('otaInstall').disabled=true;
+    element('otaMessage').textContent='Немає зв’язку з пристроєм. Після перезапуску оновіть сторінку.';
+  }
+}
+async function otaAction(action){
+  if(!signedIn||otaRequestPending)return;
+  if(action==='install'&&!confirm('Встановити нову прошивку й перезапустити пристрій?'))return;
+  otaRequestPending=true;element('otaCheck').disabled=true;element('otaInstall').disabled=true;
+  try{
+    const response=await api('/api/ota',mutation('POST',{action}));
+    if(response.status===401){showLogin();return;}
+    if(!response.ok)throw new Error('ota');
+    element('otaMessage').textContent='Запит прийнято…';
+  }catch{element('otaMessage').textContent='Запит не прийнято. Перевірте підключення або дочекайтеся завершення поточного оновлення.';}
+  finally{otaRequestPending=false;}
+  await loadOta();
+}
+element('otaCheck').addEventListener('click',()=>otaAction('check'));
+element('otaInstall').addEventListener('click',()=>otaAction('install'));
 async function refresh(){
   if(busy)return;busy=true;
-  try{const result=await request();if(result){show(result.state);if(result.state.ready){message.className='';message.textContent='';}await loadVoltages();await loadZigbee();}}
+  try{const result=await request();if(result){show(result.state);if(result.state.ready){message.className='';message.textContent='';}await loadVoltages();await loadZigbee();await loadOta();}}
   catch{offline();}finally{busy=false;}
 }
 button.addEventListener('click',async()=>{
-  if(busy||!current||!current.ready)return;
+  if(busy||!current||!current.ready||(current.mode??1)!==1)return;
   const wanted=!current.on;busy=true;changing=true;button.disabled=true;
   message.className='';message.textContent='Зберігаємо та очікуємо підтвердження…';
   try{
@@ -369,7 +582,7 @@ button.addEventListener('click',async()=>{
     if(result.ok&&result.state.ready&&result.state.output_known&&result.state.storage_known&&result.state.on===wanted&&result.state.saved_on===wanted){message.className='';message.textContent='Виконано. Стан збережено.';}
     else{message.className='error';message.textContent='Зміну не підтверджено. Перевірте стан пристрою.';}
   }catch{offline();}
-  finally{changing=false;busy=false;button.disabled=!current||!current.ready||!current.output_known;}
+  finally{changing=false;busy=false;button.disabled=!current||!current.ready||!current.output_known||(current.mode??1)!==1;}
 });
 element('loginForm').addEventListener('submit',async event=>{
   event.preventDefault();if(busy)return;busy=true;element('loginButton').disabled=true;

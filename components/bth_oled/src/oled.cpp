@@ -188,6 +188,61 @@ OledFrame render_ipv4(const std::array<std::uint8_t, 4>& address) noexcept {
     return fit_window(frame);
 }
 
+OledFrame render_outages(const OutageDisplay& display) noexcept {
+    OledFrame frame{};
+    struct Glyph { char32_t c; std::uint8_t rows[7]; };
+    constexpr Glyph font[] = {
+        {U'Г',{31,16,16,16,16,16,16}}, {U'Р',{30,17,17,30,16,16,16}},
+        {U'А',{14,17,17,31,17,17,17}}, {U'Ф',{4,14,21,21,14,4,4}},
+        {U'І',{14,4,4,4,4,4,14}}, {U'К',{17,18,20,24,20,18,17}},
+        {U'Н',{17,17,17,31,17,17,17}}, {U'Е',{31,16,16,30,16,16,31}},
+        {U'М',{17,27,21,21,17,17,17}}, {U'Є',{14,17,16,28,16,17,14}},
+        {U'Д',{7,9,9,9,9,31,17}}, {U'И',{17,17,19,21,25,17,17}},
+        {U'Х',{17,17,10,4,10,17,17}}, {U'З',{14,17,1,6,1,17,14}},
+        {U'С',{14,17,16,16,16,17,14}}, {U'Т',{31,4,4,4,4,4,4}},
+        {U'Л',{7,9,9,9,9,9,17}}, {U'О',{14,17,17,17,17,17,14}},
+        {U'Б',{31,16,16,30,17,17,30}}, {U'В',{30,17,17,30,17,17,30}},
+        {U'0',{14,17,19,21,25,17,14}}, {U'1',{4,12,4,4,4,4,14}},
+        {U'2',{14,17,1,2,4,8,31}}, {U'3',{30,1,1,14,1,1,30}},
+        {U'4',{2,6,10,18,31,2,2}}, {U'5',{31,16,16,30,1,1,30}},
+        {U'6',{14,16,16,30,17,17,14}}, {U'7',{31,1,2,4,8,8,8}},
+        {U'8',{14,17,17,14,17,17,14}}, {U'9',{14,17,17,15,1,1,14}},
+    };
+    const auto text = [&](const char32_t* s, int y) {
+        int x=0;
+        for (; *s; ++s, x+=6)
+            for (const auto& g : font) if (g.c == *s)
+                for (int row=0; row<7; ++row)
+                    for (int col=0; col<5; ++col)
+                        if (g.rows[row] & (1U << (4-col))) pixel(frame,x+col,y+row);
+    };
+    char32_t heading[] = U"ГРАФІК 00";
+    heading[7] = U'0' + display.group / 10 % 10;
+    heading[8] = U'0' + display.group % 10;
+    text(heading,0);
+    if (display.state == OutageDisplayState::interval) {
+        char line[16]{};
+        std::snprintf(line,sizeof(line),"%02u:%02u-%02u:%02u",display.begin/60%25,display.begin%60,display.end/60%25,display.end%60);
+        int x=0;
+        for (const char* c=line; *c; ++c) {
+            if (*c == ':') { bar(frame,x,16,2,2); bar(frame,x,25,2,2); x+=4; }
+            else if (*c == '-') { bar(frame,x,21,6,2); x+=8; }
+            else {
+                OledFrame source{}; digit(source,0,0,static_cast<unsigned>(*c-'0'));
+                for (int y=0;y<20;++y) for (int col=0;col<10;++col) {
+                    const int sy=y*32/20,sx=col*18/10;
+                    if (source[sy/8*128+sx] & (1U << (sy%8))) pixel(frame,x+col,y+12);
+                }
+                x+=12;
+            }
+        }
+    } else {
+        text(display.state == OutageDisplayState::clear ? U"ДАЛІ БЕЗ ВІДКЛ" :
+             display.state == OutageDisplayState::stale ? U"ЗАСТАРІЛО" : U"НЕМАЄ ДАНИХ",19);
+    }
+    return fit_window(frame);
+}
+
 OledFrame render_startup_splash() noexcept {
     // B-T HOME, 5x7 glyphs scaled 2x3, centered within 128x32.
     constexpr std::uint8_t glyphs[][7] = {
@@ -316,14 +371,7 @@ Status OledModule::init() noexcept {
     if (page_count_ == 0 || page_count_ + (show_average_ ? 1 : 0) > max_pages)
         return Status::invalid_argument;
     acquired_ = true;
-    auto result = transport_.init();
-    if (result != Status::ok) { return result; }
-    result = transport_.probe(present_);
-    if (result != Status::ok) { return result; }
-    if (!present_) {
-        transport_.deinit();
-        acquired_ = false;
-    }
+    const auto result = transport_.init();
     initialized_ = result == Status::ok;
     return result;
 }
@@ -337,35 +385,18 @@ Status OledModule::start() noexcept {
     battery_enabled_ = battery_fresh_ = false;
     relay_on_ = relay_valid_ = false;
     ipv4_ = {};
+    outages_ = {};
     average_samples_ = {};
     average_sum_ = 0;
     average_count_ = average_next_ = 0;
     active_page_ = 0;
+    generation_ = 0;
     page_timed_ = false;
     splash_active_ = splash_ms_ != 0;
     splash_timed_ = false;
-    if (!present_) {
-        running_ = true;
-        return Status::ok;
-    }
-    // Control byte 0x00 introduces commands. Configure 32 COM rows and charge pump.
-    const std::uint8_t setup[] = {
-        0x00, 0xae, 0xd5, 0x80, 0xa8, 0x1f, 0xd3, 0x00, 0x40,
-        0x8d, 0x14, 0x20, 0x00, 0xa1, 0xc8, 0xda, 0x02,
-        0x81, contrast_, 0xd9, 0xf1, 0xdb, 0x20, 0xa4, 0xa6, 0x2e, 0x23, 0x00, 0xd6, 0x00,
-        0x21, 0x00, 0x7f, 0x22, 0x00, 0x03};
-    auto result = transport_.write(setup, sizeof(setup));
-    if (result != Status::ok) { return result; }
     frame_ = splash_active_ ? render_startup_splash() : render_voltage(0, false);
-    std::array<std::uint8_t, 513> data{};
-    data[0] = 0x40;  // Data control byte; overwrite all four pages before display-on.
-    std::copy(frame_.begin(), frame_.end(), data.begin() + 1);
-    result = transport_.write(data.data(), data.size());
-    if (result != Status::ok) { return result; }
-    const std::uint8_t on[] = {0x00, 0xaf};
-    result = transport_.write(on, sizeof(on));
-    if (result != Status::ok) { return result; }
-    result = transport_.start_updates();
+    auto result = transport_.start_updates();
+    if (result == Status::ok) result = transport_.submit({frame_, generation_, contrast_});
     running_ = result == Status::ok;
     return result;
 }
@@ -411,13 +442,35 @@ Status OledModule::report_value(unsigned page, double volts, bool valid) noexcep
     return Status::ok;
 }
 
+OledReadings OledModule::readings(std::uint64_t now_ms) const noexcept {
+    OledReadings result{};
+    if (!running_) return result;
+    if (show_average_ && page_count_ < max_pages) {
+        const auto& average = pages_[page_count_];
+        result.average_volts = average.volts;
+        result.average_valid = average.received && average.valid &&
+            now_ms >= average.last_reading_ms && now_ms - average.last_reading_ms < 2500;
+    }
+    if (battery_enabled_ && now_ms >= battery_at_ && now_ms - battery_at_ < 2500) {
+        result.battery = battery_;
+        const auto& dc = pages_[1];
+        result.battery.valid = result.battery.valid && page_count_ > 1 && dc.received &&
+            dc.valid && std::isfinite(dc.volts) && dc.volts >= 0 && dc.volts < 30.05 &&
+            now_ms >= dc.last_reading_ms && now_ms - dc.last_reading_ms < 2500;
+    }
+    result.relay_on = relay_on_;
+    result.relay_valid = show_relay_ && relay_valid_;
+    if (show_ip_) result.ipv4 = ipv4_;
+    result.outages = outages_;
+    return result;
+}
+
 Status OledModule::tick(std::uint64_t now_ms) noexcept {
     if (!running_) return Status::invalid_state;
-    if (!present_) return Status::ok;
     if (battery_fresh_) { battery_at_ = now_ms; battery_fresh_ = false; }
     if (now_ms < battery_at_ || now_ms - battery_at_ >= 2500) battery_ = {};
     const auto status = transport_.poll();
-    if (status != Status::ok) return status;
+    if (status != Status::ok && status != Status::hardware_error) return status;
     const unsigned voltage_pages = page_count_ + (show_average_ ? 1 : 0);
     for (unsigned i = 0; i < voltage_pages; ++i) {
         auto& page = pages_[i];
@@ -429,17 +482,24 @@ Status OledModule::tick(std::uint64_t now_ms) noexcept {
     }
     // Share the first Runtime tick as the epoch with the startup LED burst.
     // Continue ingesting readings above while the splash is visible.
+    bool refresh = false;
     if (splash_active_) {
         if (!splash_timed_) { splash_started_ms_ = now_ms; splash_timed_ = true; }
         if (now_ms - splash_started_ms_ < splash_ms_) return Status::ok;
         splash_active_ = false;
+        refresh = true;
     }
     if (!page_timed_) { page_since_ms_ = now_ms; page_timed_ = true; }
     const auto steps = (now_ms - page_since_ms_) / 3000;
     const unsigned relay_page = voltage_pages + (show_history_ ? 2 : 0);
     const unsigned ip_page = relay_page + (show_relay_ ? 1 : 0);
-    const unsigned total_pages = ip_page + (show_ip_ ? 1 : 0);
+    const unsigned outage_page = ip_page + (show_ip_ ? 1 : 0);
+    const bool show_outages = outages_.state != OutageDisplayState::hidden;
+    const unsigned total_pages = outage_page + (show_outages ? 1 : 0);
+    const auto previous_page = active_page_;
     active_page_ = static_cast<unsigned>((active_page_ + steps % total_pages) % total_pages);
+    refresh = refresh || steps != 0 || previous_page != active_page_;
+    if (refresh) ++generation_;
     page_since_ms_ += steps * 3000;
     const bool average_page = show_average_ && active_page_ == 1;
     const bool voltage_page = active_page_ < voltage_pages;
@@ -448,7 +508,9 @@ Status OledModule::tick(std::uint64_t now_ms) noexcept {
     const auto& page = pages_[voltage_page ? data_page : 0];
     const bool valid = page.received && now_ms - page.last_reading_ms < 2500 && page.valid;
     const bool previous = active_page_ == voltage_pages + 1;
-    const auto next = show_ip_ && active_page_ == ip_page
+    const auto next = show_outages && active_page_ == outage_page
+        ? render_outages(outages_)
+        : show_ip_ && active_page_ == ip_page
         ? render_ipv4(ipv4_)
         : show_relay_ && active_page_ == relay_page
         ? render_relay(relay_on_, relay_valid_)
@@ -458,18 +520,14 @@ Status OledModule::tick(std::uint64_t now_ms) noexcept {
             : render_voltage(page.volts, valid, average_page ? VoltageKind::average :
                          data_page == 0 ? VoltageKind::ac : VoltageKind::dc))
         : render_mains_period(valid ? (previous ? history_.previous : history_.current) : MainsPeriod{}, previous);
-    if (next == frame_) return Status::ok;
-    const auto result = transport_.submit(next);
+    if (!refresh && (status == Status::hardware_error || next == frame_)) return Status::ok;
+    const auto result = transport_.submit({next, generation_, contrast_});
     if (result == Status::ok) frame_ = next;
     return result;
 }
 
 void OledModule::stop() noexcept {
     transport_.stop_updates();
-    if (start_attempted_ && present_) {
-        const std::uint8_t off[] = {0x00, 0xae};
-        (void)transport_.write(off, sizeof(off));
-    }
     running_ = false;
     start_attempted_ = false;
 }
@@ -477,6 +535,6 @@ void OledModule::stop() noexcept {
 void OledModule::deinit() noexcept {
     stop();
     if (acquired_) { transport_.deinit(); }
-    acquired_ = initialized_ = present_ = false;
+    acquired_ = initialized_ = false;
 }
 }  // namespace bth

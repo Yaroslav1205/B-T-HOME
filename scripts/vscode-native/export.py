@@ -52,7 +52,8 @@ def export(destination: Path, configuration_only: bool = False) -> None:
     if not configuration_only:
         files += ["bt_home.bin", "bt_home.elf", "bt_home.map", "flash_args",
                   "flash_project_args", "flasher_args.json", "bootloader/bootloader.bin",
-                  "bootloader/bootloader.elf", "partition_table/partition-table.bin"]
+                  "bootloader/bootloader.elf", "partition_table/partition-table.bin",
+                  "ota_data_initial.bin"]
     for name in files:
         if not (source / name).is_file():
             raise FileNotFoundError(f"Missing native build artifact: {name}")

@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Firmware package tests
+        run: python3 -m unittest discover -s tests -p test_package_firmware.py
       - name: Configure
         run: cmake -S tests/host -B build/host -DCMAKE_BUILD_TYPE=Debug
       - name: Build and test

@@ -1,4 +1,5 @@
 #include "bth/battery/battery.hpp"
+#include "bth/battery/settings.hpp"
 #include <algorithm>
 #include <cmath>
 
@@ -88,6 +89,11 @@ Status BatteryModule::save() noexcept {
         save_due_ = false;
     }
     return result;
+}
+Status BatteryModule::set_discharge_ma(std::uint32_t milliamps) noexcept {
+    if (!milliamps || milliamps > battery_max_discharge_ma) return Status::invalid_argument;
+    config_.discharge_ua = milliamps * 1000;
+    return Status::ok;
 }
 Status BatteryModule::service() noexcept {
     if (!running_ || save_failed_) return Status::invalid_state;

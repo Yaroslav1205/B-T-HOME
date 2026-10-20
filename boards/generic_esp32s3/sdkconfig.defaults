@@ -1,1 +1,5 @@
 CONFIG_ESPTOOLPY_FLASHSIZE_2MB=y
+
+# The authenticated web application exceeds the 1 MiB factory slot.
+# IDF single_app_large uses 1500 KiB within the existing 2 MiB flash limit.
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y

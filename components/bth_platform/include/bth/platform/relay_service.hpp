@@ -1,13 +1,14 @@
 #pragma once
 #include "bth/core/module.hpp"
 #include "bth/relay/relay.hpp"
+#include "bth/mains/mains.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include <atomic>
 namespace bth {
-class RelayService final : public Module {
+class RelayService final : public Module, public MainsSink {
 public:
     RelayService(RelayController& controller, bool configured) noexcept
         : controller_(controller), configured_(configured) {}
@@ -15,7 +16,9 @@ public:
     Dependencies dependencies() const noexcept override { return {required_, 1}; }
     Status init() noexcept override;
     Status start() noexcept override;
-    Status tick(std::uint64_t) noexcept override { return Status::ok; }
+    Status tick(std::uint64_t now_ms) noexcept override;
+    void report(const MainsReading& reading) noexcept override;
+    bool request_mode(RelayMode mode, RelayState& result) noexcept;
     void stop() noexcept override;
     void deinit() noexcept override;
     RelayState snapshot() const noexcept;
@@ -25,7 +28,11 @@ public:
     bool post(bool on) noexcept;
     bool idle() const noexcept { return pending_.load() == 0; }
 private:
-    struct Command { std::uint32_t id; bool on; bool stop; };
+    struct Command { std::uint32_t id; bool on; bool stop; int mode = -1; };
+    bool exchange(Command command, RelayState& result) noexcept;
+    std::atomic<bool> absent_{false};
+    bool fresh_ = false, reported_absent_ = false;
+    std::uint64_t report_ms_ = 0;
     struct Reply { std::uint32_t id; RelayState state; };
     inline static constexpr const char* required_[] = {"nvs"};
     static void worker(void* context);

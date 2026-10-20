@@ -46,13 +46,15 @@ public:
     void report(const DcReading& reading) noexcept override;
     // Call after Runtime::tick, never from a callback or ISR. May commit NVS.
     Status service() noexcept;
+    // Owner task only, after tick: preserves the accumulated charge.
+    Status set_discharge_ma(std::uint32_t milliamps) noexcept;
 private:
     static constexpr std::uint64_t freshness_ms = 2500;
     static constexpr std::uint64_t checkpoint_ms = 300000;
     Status save() noexcept;
     BatteryStore& store_;
     BatterySink& sink_;
-    const BatteryConfig config_;
+    BatteryConfig config_;
     const Dependencies required_;
     // Internal microamp-milliseconds retain sub-milliamp current at short ticks.
     // BatteryStore keeps the existing milliamp-millisecond representation.

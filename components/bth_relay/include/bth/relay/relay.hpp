@@ -2,6 +2,7 @@
 #include "bth/core/module.hpp"
 
 namespace bth {
+enum class RelayMode : unsigned char { unused = 0, manual = 1, outage = 2 };
 class RelayOutput {
 public:
     virtual ~RelayOutput() = default;
@@ -15,9 +16,12 @@ public:
     virtual Status init() noexcept = 0;
     virtual Status load(bool& on) noexcept = 0;  // Missing key means OFF.
     virtual Status save(bool on) noexcept = 0;  // Success means durably committed.
+    virtual Status load_mode(RelayMode& mode) noexcept { mode = RelayMode::manual; return Status::ok; }
+    virtual Status save_mode(RelayMode) noexcept { return Status::invalid_state; }
     virtual void deinit() noexcept = 0;
 };
 struct RelayState {
+    RelayMode mode = RelayMode::manual;
     bool ready = false;
     bool on = false;
     bool saved_on = false;
@@ -37,6 +41,8 @@ public:
     Status init() noexcept;
     Status start() noexcept;
     Status set(bool on) noexcept;
+    Status set_mode(RelayMode mode, bool absent) noexcept;
+    Status automatic(bool absent) noexcept;
     void stop() noexcept;
     void deinit() noexcept;
     RelayState state() const noexcept { return state_; }

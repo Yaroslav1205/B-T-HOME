@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_app_desc.h"
 
 extern const unsigned char page_start[] asm("_binary_index_html_start");
 extern const unsigned char page_end[] asm("_binary_index_html_end");
@@ -84,34 +85,47 @@ Status RelayWeb::init() noexcept {
                   static_cast<unsigned>(mac[2]), static_cast<unsigned>(mac[3]),
                   static_cast<unsigned>(mac[4]), static_cast<unsigned>(mac[5]));
     voltages_ = {};
-    voltage_queue_ = xQueueCreate(1, sizeof(WebVoltages));
+    snapshot_ = {};
+    voltage_queue_ = xQueueCreate(1, sizeof(Snapshot));
     if (!voltage_queue_) return Status::no_memory;
-    xQueueOverwrite(voltage_queue_, &voltages_);
-    return Status::ok;
+    publish();
+    return ota_ ? ota_->init() : Status::ok;
 }
 void RelayWeb::report(const MainsReading& reading) noexcept {
     voltages_.history = reading.history;
     if (!voltage_queue_) return;
     voltages_.mains = {reading.volts, static_cast<std::uint64_t>(esp_timer_get_time() / 1000),
                       true, reading.valid, reading.calibrated};
-    xQueueOverwrite(voltage_queue_, &voltages_);
+    publish();
 }
 void RelayWeb::report(const DcReading& reading) noexcept {
     if (!voltage_queue_) return;
     voltages_.battery = {reading.volts, static_cast<std::uint64_t>(esp_timer_get_time() / 1000),
                         true, reading.valid, true};
-    xQueueOverwrite(voltage_queue_, &voltages_);
+    publish();
+}
+void RelayWeb::publish() noexcept {
+    snapshot_.voltages = voltages_;
+    if (voltage_queue_) xQueueOverwrite(voltage_queue_, &snapshot_);
+}
+void RelayWeb::report_display(const OledReadings& reading, std::uint64_t now_ms) noexcept {
+    snapshot_.display = reading;
+    snapshot_.display_at = now_ms;
+    snapshot_.display_received = true;
+    publish();
 }
 void RelayWeb::deinit() noexcept {
     stop();
+    if (ota_) ota_->deinit();
     if (voltage_queue_) { vQueueDelete(voltage_queue_); voltage_queue_ = nullptr; }
     voltages_ = {};
 }
 Status RelayWeb::start() noexcept {
     if (!voltage_queue_ || server_) return Status::invalid_state;
+    if (ota_) { const auto result = ota_->start(); if (result != Status::ok) return result; }
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_uri_handlers = 12;
+    config.max_uri_handlers = 20;
     config.max_open_sockets = 4;
     config.lru_purge_enable = true;
     config.recv_wait_timeout = 3;
@@ -123,12 +137,18 @@ Status RelayWeb::start() noexcept {
     uri.method = HTTP_GET;
     uri.handler = page;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
-    uri.uri = "/api/relay";
+    uri.uri = "/api/ota"; uri.handler = get_ota;
+    if (httpd_register_uri_handler(server_, &uri) != ESP_OK) return Status::hardware_error;
+    uri.method = HTTP_POST; uri.handler = set_ota;
+    if (httpd_register_uri_handler(server_, &uri) != ESP_OK) return Status::hardware_error;
+    uri.uri = "/api/relay"; uri.method = HTTP_GET;
     uri.handler = get_state;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
     uri.method = HTTP_PUT;
     uri.handler = set_state;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
+    uri.uri = "/api/relay-mode"; uri.method = HTTP_PUT; uri.handler = set_relay_mode;
+    if (httpd_register_uri_handler(server_, &uri) != ESP_OK) return Status::hardware_error;
     uri.uri = "/api/login"; uri.method = HTTP_POST; uri.handler = login;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
     uri.uri = "/api/logout"; uri.handler = logout;
@@ -137,9 +157,17 @@ Status RelayWeb::start() noexcept {
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
     uri.method = HTTP_PUT; uri.handler = set_settings;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
+    uri.uri = "/api/outages"; uri.method = HTTP_GET; uri.handler = get_outages;
+    if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
+    uri.method = HTTP_PUT; uri.handler = set_outages;
+    if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
     uri.uri = "/api/buzzer"; uri.method = HTTP_GET; uri.handler = get_buzzer;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
     uri.method = HTTP_PUT; uri.handler = set_buzzer;
+    if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
+    uri.uri = "/api/battery"; uri.method = HTTP_GET; uri.handler = get_battery;
+    if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
+    uri.method = HTTP_PUT; uri.handler = set_battery;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
     uri.uri = "/api/voltages"; uri.method = HTTP_GET; uri.handler = get_voltages;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
@@ -155,6 +183,7 @@ void RelayWeb::stop() noexcept {
         (void)httpd_stop(server_);
         server_ = nullptr;
     }
+    if (ota_) ota_->stop();
     sessions_ = {};
     wifi_pending_ = false;
 }
@@ -172,9 +201,9 @@ esp_err_t RelayWeb::send_state(httpd_req_t* request, const RelayState& state) {
     httpd_resp_set_type(request, "application/json");
     char json[320]{};
     const int length = std::snprintf(json, sizeof(json),
-        "{\"ready\":%s,\"on\":%s,\"saved_on\":%s,\"output_known\":%s,"
+        "{\"mode\":%u,\"ready\":%s,\"on\":%s,\"saved_on\":%s,\"output_known\":%s,"
         "\"storage_known\":%s,\"error\":\"%s\",\"mac\":\"%s\",\"wifi_mode\":\"%s\"}",
-        boolean(state.ready), boolean(state.on), boolean(state.saved_on),
+        static_cast<unsigned>(state.mode), boolean(state.ready), boolean(state.on), boolean(state.saved_on),
         boolean(state.output_known), boolean(state.storage_known), status_name(state.error), self.ap_mac_,
         self.wifi_ ? "ap" : "matter");
     if (length < 0 || static_cast<std::size_t>(length) >= sizeof(json)) {
@@ -220,9 +249,10 @@ esp_err_t RelayWeb::get_state(httpd_req_t* request) {
 esp_err_t RelayWeb::get_voltages(httpd_req_t* request) {
     auto& self = *static_cast<RelayWeb*>(request->user_ctx);
     if (!self.authorized(request)) return ESP_OK;
-    WebVoltages snapshot;
-    if (!self.voltage_queue_ || xQueuePeek(self.voltage_queue_, &snapshot, 0) != pdTRUE)
+    Snapshot queued{};
+    if (!self.voltage_queue_ || xQueuePeek(self.voltage_queue_, &queued, 0) != pdTRUE)
         return error(request, "503 Service Unavailable", "measurements_unavailable");
+    const auto& snapshot = queued.voltages;
     const auto now = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
     auto* json = cJSON_CreateObject();
     if (!json) return error(request, "500 Internal Server Error", "no_memory");
@@ -250,6 +280,33 @@ esp_err_t RelayWeb::get_voltages(httpd_req_t* request) {
         cJSON_Delete(json);
         return error(request, "500 Internal Server Error", "no_memory");
     }
+    if (queued.display_received && now >= queued.display_at && now - queued.display_at < 2500) {
+        const auto& d = queued.display;
+        auto* display = cJSON_AddObjectToObject(json, "display");
+        const char* outage_states[] = {"hidden", "unavailable", "stale", "clear", "interval"};
+        char ip[16]{};
+        if (d.ipv4 != std::array<std::uint8_t, 4>{})
+            std::snprintf(ip, sizeof(ip), "%u.%u.%u.%u",
+                unsigned(d.ipv4[0]), unsigned(d.ipv4[1]), unsigned(d.ipv4[2]), unsigned(d.ipv4[3]));
+        const bool remaining = d.battery.valid && d.battery.mains_known && !d.battery.mains_present;
+        if (!display ||
+            !cJSON_AddNumberToObject(display, "age_ms", static_cast<double>(now - queued.display_at)) ||
+            !(d.average_valid ? cJSON_AddNumberToObject(display, "average_volts", d.average_volts)
+                              : cJSON_AddNullToObject(display, "average_volts")) ||
+            !(remaining ? cJSON_AddNumberToObject(display, "battery_minutes", static_cast<double>(d.battery.minutes))
+                        : cJSON_AddNullToObject(display, "battery_minutes")) ||
+            !cJSON_AddBoolToObject(display, "mains_present", d.battery.mains_known && d.battery.mains_present) ||
+            !(d.relay_valid ? cJSON_AddBoolToObject(display, "relay_on", d.relay_on)
+                           : cJSON_AddNullToObject(display, "relay_on")) ||
+            !cJSON_AddStringToObject(display, "ipv4", ip) ||
+            !cJSON_AddStringToObject(display, "outage_state", outage_states[static_cast<unsigned>(d.outages.state)]) ||
+            !cJSON_AddNumberToObject(display, "outage_group", d.outages.group) ||
+            !cJSON_AddNumberToObject(display, "outage_begin", d.outages.begin) ||
+            !cJSON_AddNumberToObject(display, "outage_end", d.outages.end)) {
+            cJSON_Delete(json);
+            return error(request, "500 Internal Server Error", "no_memory");
+        }
+    }
     return send_json(request, json);
 }
 esp_err_t RelayWeb::set_state(httpd_req_t* request) {
@@ -271,6 +328,8 @@ esp_err_t RelayWeb::set_state(httpd_req_t* request) {
         if (count <= 0) { return ESP_FAIL; }
         received += static_cast<std::size_t>(count);
     }
+    if (self.relay_.snapshot().mode != RelayMode::manual)
+        return error(request, "409 Conflict", "manual_mode_required");
     bool on = false;
     if (!parse_relay_command({body, received}, on)) {
         return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "expected_boolean");
@@ -379,6 +438,7 @@ esp_err_t RelayWeb::get_settings(httpd_req_t* request) {
 esp_err_t RelayWeb::set_settings(httpd_req_t* request) {
     auto& self = *static_cast<RelayWeb*>(request->user_ctx);
     if (!self.authorized(request)) { return ESP_OK; }
+    if (self.ota_ && (self.ota_->busy() || self.ota_->reboot_requested())) return error(request, "409 Conflict", "ota_busy");
     if (self.wifi_pending_) { return error(request, "409 Conflict", "wifi_pending"); }
     auto* json = read_json(request);
     if (!json) { return ESP_OK; }
@@ -452,6 +512,93 @@ esp_err_t RelayWeb::set_settings(httpd_req_t* request) {
     }
     return send_json(request, response);
 }
+esp_err_t RelayWeb::set_relay_mode(httpd_req_t* request) {
+    auto& self = *static_cast<RelayWeb*>(request->user_ctx);
+    if (!self.authorized(request)) return ESP_OK;
+    auto* json = read_json(request);
+    if (!json) return ESP_OK;
+    const auto* value = cJSON_GetObjectItemCaseSensitive(json, "mode");
+    const bool valid = cJSON_IsNumber(value) && std::isfinite(value->valuedouble) &&
+        value->valuedouble >= 0 && value->valuedouble <= 2 &&
+        std::floor(value->valuedouble) == value->valuedouble;
+    if (!valid) {
+        cJSON_Delete(json);
+        return error(request, "400 Bad Request", "invalid_mode");
+    }
+    const auto mode = static_cast<RelayMode>(value->valueint);
+    cJSON_Delete(json);
+    RelayState state{};
+    if (!self.relay_.request_mode(mode, state))
+        return error(request, "503 Service Unavailable", "command_pending");
+    if (!state.ready || state.error != Status::ok || state.mode != mode)
+        httpd_resp_set_status(request, "503 Service Unavailable");
+    return send_state(request, state);
+}
+esp_err_t RelayWeb::get_ota(httpd_req_t* request) {
+    auto& self = *static_cast<RelayWeb*>(request->user_ctx);
+    if (!self.authorized(request)) return ESP_OK;
+    auto* json = cJSON_CreateObject();
+    if (json) {
+        const auto value = self.ota_ ? self.ota_->snapshot() : OtaSnapshot{};
+        cJSON_AddBoolToObject(json, "supported", self.ota_ && OtaService::supported());
+        cJSON_AddBoolToObject(json, "connected", self.ota_ && self.ota_->connected());
+        cJSON_AddBoolToObject(json, "busy", self.ota_ && self.ota_->busy());
+        cJSON_AddStringToObject(json, "current_version", esp_app_get_description()->version);
+        cJSON_AddStringToObject(json, "version", value.version);
+        cJSON_AddStringToObject(json, "state", value.state);
+        cJSON_AddStringToObject(json, "error", value.error);
+        cJSON_AddNumberToObject(json, "received", value.received);
+        cJSON_AddNumberToObject(json, "total", value.total);
+    }
+    return send_json(request, json);
+}
+esp_err_t RelayWeb::set_ota(httpd_req_t* request) {
+    auto& self = *static_cast<RelayWeb*>(request->user_ctx);
+    if (!self.authorized(request)) return ESP_OK;
+    auto* json = read_json(request);
+    if (!json) return ESP_OK;
+    const char* action = field(json, "action");
+    const bool install = action && std::strcmp(action, "install") == 0;
+    const bool check = action && std::strcmp(action, "check") == 0;
+    cJSON_Delete(json);
+    if (!install && !check) return error(request, "400 Bad Request", "invalid_action");
+    if (!self.ota_ || !OtaService::supported()) return error(request, "409 Conflict", "ota_unsupported");
+    if (self.wifi_pending_) return error(request, "409 Conflict", "wifi_pending");
+    if (!self.ota_->connected()) return error(request, "409 Conflict", "wifi_required");
+    if (!self.ota_->request(install)) return error(request, "409 Conflict", "ota_busy");
+    httpd_resp_set_status(request, "202 Accepted");
+    return get_ota(request);
+}
+esp_err_t RelayWeb::get_outages(httpd_req_t* request) {
+    auto& self = *static_cast<RelayWeb*>(request->user_ctx);
+    if (!self.authorized(request)) return ESP_OK;
+    auto* json = cJSON_CreateObject();
+    if (json) {
+        cJSON_AddBoolToObject(json, "available", self.outages_ != nullptr);
+        if (self.outages_) cJSON_AddNumberToObject(json, "group", self.outages_->group());
+    }
+    return send_json(request, json);
+}
+esp_err_t RelayWeb::set_outages(httpd_req_t* request) {
+    auto& self = *static_cast<RelayWeb*>(request->user_ctx);
+    if (!self.authorized(request)) return ESP_OK;
+    if (!self.outages_) return error(request, "404 Not Found", "outages_unavailable");
+    auto* json = read_json(request);
+    if (!json) return ESP_OK;
+    const auto* value = cJSON_GetObjectItemCaseSensitive(json, "group");
+    const bool valid = cJSON_IsNumber(value) && std::isfinite(value->valuedouble) &&
+        value->valuedouble >= 0 && value->valuedouble <= outage_max_group &&
+        std::floor(value->valuedouble) == value->valuedouble;
+    if (!valid) {
+        cJSON_Delete(json);
+        return error(request, "400 Bad Request", "invalid_group");
+    }
+    const auto group = static_cast<std::uint32_t>(value->valuedouble);
+    cJSON_Delete(json);
+    const auto result = self.outages_->update_group(group);
+    if (result != Status::ok) return error(request, "503 Service Unavailable", "save_failed");
+    return get_outages(request);
+}
 esp_err_t RelayWeb::get_buzzer(httpd_req_t* request) {
     auto& self = *static_cast<RelayWeb*>(request->user_ctx);
     if (!self.authorized(request)) return ESP_OK;
@@ -481,6 +628,36 @@ esp_err_t RelayWeb::set_buzzer(httpd_req_t* request) {
     const auto result = self.buzzer_->update_interval(seconds);
     if (result != Status::ok) return error(request, "503 Service Unavailable", "save_failed");
     return get_buzzer(request);
+}
+esp_err_t RelayWeb::get_battery(httpd_req_t* request) {
+    auto& self = *static_cast<RelayWeb*>(request->user_ctx);
+    if (!self.authorized(request)) return ESP_OK;
+    auto* json = cJSON_CreateObject();
+    if (json) {
+        cJSON_AddBoolToObject(json, "available", self.battery_ != nullptr);
+        if (self.battery_) cJSON_AddNumberToObject(json, "discharge_ma", self.battery_->discharge_ma());
+    }
+    return send_json(request, json);
+}
+esp_err_t RelayWeb::set_battery(httpd_req_t* request) {
+    auto& self = *static_cast<RelayWeb*>(request->user_ctx);
+    if (!self.authorized(request)) return ESP_OK;
+    if (!self.battery_) return error(request, "404 Not Found", "battery_unavailable");
+    auto* json = read_json(request);
+    if (!json) return ESP_OK;
+    const auto* value = cJSON_GetObjectItemCaseSensitive(json, "discharge_ma");
+    const bool valid = cJSON_IsNumber(value) && std::isfinite(value->valuedouble) &&
+        value->valuedouble >= 1 && value->valuedouble <= battery_max_discharge_ma &&
+        std::floor(value->valuedouble) == value->valuedouble;
+    if (!valid) {
+        cJSON_Delete(json);
+        return error(request, "400 Bad Request", "invalid_interval");
+    }
+    const auto milliamps = static_cast<std::uint32_t>(value->valuedouble);
+    cJSON_Delete(json);
+    const auto result = self.battery_->update_discharge(milliamps);
+    if (result != Status::ok) return error(request, "503 Service Unavailable", "save_failed");
+    return get_battery(request);
 }
 void RelayWeb::apply_wifi(void* context) {
     auto& self = *static_cast<RelayWeb*>(context);

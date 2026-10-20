@@ -4,30 +4,67 @@
 #include "bth/battery/battery.hpp"
 #include "bth/mains/mains.hpp"
 #include <array>
+#include "bth/outages/outages.hpp"
 
 namespace bth {
 
 using OledFrame = std::array<std::uint8_t, 128 * 32 / 8>;
 
-// Synchronous probing/transfers run only during setup/cleanup, never from tick.
+struct OledUpdate {
+    OledFrame frame{};
+    // Carried by every frame: a queue overwrite cannot discard a page refresh.
+    std::uint64_t generation = 0;
+    std::uint8_t contrast = 0;
+};
+
+// Only the display worker uses this interface. Each operation must be bounded.
+class OledIo {
+public:
+    virtual ~OledIo() = default;
+    virtual Status write(const std::uint8_t* bytes, std::size_t size) noexcept = 0;
+    virtual Status recover_bus() noexcept = 0;
+};
+
+// Worker-owned SSD1306 state; no threads or ESP-IDF dependencies.
+class OledWriter {
+public:
+    explicit OledWriter(OledIo& io) noexcept : io_(io) {}
+    Status send(const OledUpdate& update) noexcept;
+    void off() noexcept;
+private:
+    OledIo& io_;
+    std::uint64_t generation_ = 0;
+    Status status_ = Status::ok;
+    bool attempted_ = false;
+};
+
+// The Runtime task only allocates resources, starts/joins the worker and queues frames.
 class OledTransport {
 public:
     virtual ~OledTransport() = default;
     virtual Status init() noexcept = 0;
-    // Missing/unresponsive optional display: ok with present=false.
-    virtual Status probe(bool& present) noexcept = 0;
-    virtual Status write(const std::uint8_t* bytes, std::size_t size) noexcept = 0;
     virtual Status start_updates() noexcept = 0;
-    // Copy the latest frame without waiting; poll surfaces asynchronous failures.
-    virtual Status submit(const OledFrame& frame) noexcept = 0;
+    // hardware_error from poll means offline; retry on the next generation.
+    virtual Status submit(const OledUpdate& update) noexcept = 0;
     virtual Status poll() noexcept = 0;
-    // Join pending transfers before synchronous writes or resource release.
+    // Join pending transfers and best-effort display-off before resource release.
     virtual void stop_updates() noexcept = 0;
     // Must release partially acquired resources; safe to repeat.
     virtual void deinit() noexcept = 0;
 };
 
+OledFrame render_outages(const OutageDisplay& display) noexcept;
+
 enum class VoltageKind { ac, dc, average };
+// Owner-task copy of the additional information shown on display pages.
+struct OledReadings {
+    double average_volts = 0;
+    bool average_valid = false;
+    BatteryEstimate battery{};
+    bool relay_on = false, relay_valid = false;
+    std::array<std::uint8_t, 4> ipv4{};
+    OutageDisplay outages{};
+};
 // Full-height digits with ~ / + prefix; unavailable data retains the prefix.
 OledFrame render_voltage(double volts, bool valid, VoltageKind kind = VoltageKind::ac) noexcept;
 std::array<char, 24> format_battery_line(double volts, bool valid, const BatteryEstimate& estimate) noexcept;
@@ -59,6 +96,8 @@ public:
     void report_battery(const BatteryEstimate& estimate) noexcept override {
         battery_ = estimate; battery_enabled_ = true; battery_fresh_ = true;
     }
+    void report_outages(const OutageDisplay& value) noexcept { outages_ = value; }
+    OledReadings readings(std::uint64_t now_ms) const noexcept;
     Status init() noexcept override;
     Status start() noexcept override;
     Status tick(std::uint64_t) noexcept override;
@@ -91,13 +130,14 @@ private:
     std::uint64_t splash_started_ms_ = 0;
     bool splash_active_ = false, splash_timed_ = false;
     std::array<Page, max_pages> pages_{};
+    OutageDisplay outages_{};
     OledFrame frame_{};
     std::uint64_t page_since_ms_ = 0;
     unsigned active_page_ = 0;
+    std::uint64_t generation_ = 0;
     bool page_timed_ = false;
     bool acquired_ = false;
     bool initialized_ = false;
-    bool present_ = false;
     bool start_attempted_ = false;
     bool running_ = false;
 };

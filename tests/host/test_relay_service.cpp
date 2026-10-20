@@ -49,6 +49,7 @@ struct Output final : bth::RelayOutput {
 };
 struct Store final : bth::RelayStore {
     bool saved = false;
+    bth::RelayMode mode = bth::RelayMode::manual;
     std::atomic<bool> fail_save{false};
     bth::Status init() noexcept override { return bth::Status::ok; }
     bth::Status load(bool& on) noexcept override { on = saved; return bth::Status::ok; }
@@ -56,6 +57,8 @@ struct Store final : bth::RelayStore {
         if (fail_save) return bth::Status::hardware_error;
         saved = on; return bth::Status::ok;
     }
+    bth::Status load_mode(bth::RelayMode& value) noexcept override { value = mode; return bth::Status::ok; }
+    bth::Status save_mode(bth::RelayMode value) noexcept override { mode = value; return bth::Status::ok; }
     void deinit() noexcept override {}
 };
 }
@@ -159,6 +162,29 @@ void test_relay_service() {
     CHECK_RS(!service.post(false));
     service.deinit(); join_workers();
     CHECK_RS(queues == 0);
+    store.fail_save = false;
+    CHECK_RS(service.init() == bth::Status::ok && service.start() == bth::Status::ok);
+    CHECK_RS(service.request_mode(bth::RelayMode::outage, result) && !result.on);
+    bth::MainsReading reading{};
+    reading.valid = reading.calibrated = true;
+    reading.history.current.known = true;
+    reading.history.current.present = false;
+    service.report(reading);service.tick(1000);
+    eventually([&]{return service.snapshot().on;});
+    CHECK_RS(!service.post(false));
+    CHECK_RS(service.request(false, result) && result.on);
+    service.tick(3500);
+    eventually([&]{return !service.snapshot().on;});
+    service.report(reading);service.tick(4000);
+    eventually([&]{return service.snapshot().on;});
+    reading.valid = false;service.report(reading);service.tick(4100);
+    eventually([&]{return !service.snapshot().on;});
+    reading.valid = true;reading.history.current.present = true;
+    service.report(reading);service.tick(4200);
+    CHECK_RS(service.request_mode(bth::RelayMode::unused, result) && !result.on);
+    CHECK_RS(!service.post(true));
+    CHECK_RS(service.request_mode(bth::RelayMode::manual, result) && result.on);
+    service.deinit();join_workers();CHECK_RS(queues == 0);
     bth::RelayService unavailable(controller,false);
     CHECK_RS(unavailable.start() == bth::Status::invalid_state);
     CHECK_RS(unavailable.init() == bth::Status::ok && unavailable.start() == bth::Status::ok);

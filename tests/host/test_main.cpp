@@ -357,6 +357,7 @@ void test_zigbee_storage();
 void test_radio();
 void test_matter();
 void test_oled();
+void test_oled_writer();
 void test_mains();
 void test_battery();
 void test_buzzer();
@@ -375,6 +376,7 @@ int main() {
         {"Radio modes and BOOT gestures", test_radio},
         {"Matter relay callback lifecycle", test_matter},
         {"OLED display", test_oled},
+        {"OLED page reconfiguration and recovery", test_oled_writer},
         {"access settings", test_access},
         {"relay persistence and failures", test_relay},
         {"startup blink", test_startup_blink},

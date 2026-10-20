@@ -19,6 +19,8 @@ public:
     Status init() noexcept override;
     Status load(bool& on) noexcept override;
     Status save(bool on) noexcept override;
+    Status load_mode(RelayMode& mode) noexcept override;
+    Status save_mode(RelayMode mode) noexcept override;
     void deinit() noexcept override;
 private:
     nvs_handle_t handle_ = 0;

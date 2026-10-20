@@ -7,7 +7,7 @@
 namespace {
 #define REQUIRE(condition) do { if (!(condition)) {     std::cerr << "relay:" << __LINE__ << ": " #condition "\n";     std::exit(EXIT_FAILURE); } } while (false)
 using bth::Status;
-struct Disk { bool on = false; unsigned writes = 0; };
+struct Disk { bool on = false; unsigned writes = 0; bth::RelayMode mode = bth::RelayMode::manual; };
 struct Store final : bth::RelayStore {
     Disk& disk;
     std::vector<std::string>& events;
@@ -29,6 +29,11 @@ struct Store final : bth::RelayStore {
         events.emplace_back("save");
         if (fail_save) { return Status::hardware_error; }
         disk.on = on; ++disk.writes; return Status::ok;
+    }
+    Status load_mode(bth::RelayMode& mode) noexcept override { mode = disk.mode; return Status::ok; }
+    Status save_mode(bth::RelayMode mode) noexcept override {
+        if (fail_save) return Status::hardware_error;
+        disk.mode = mode; return Status::ok;
     }
     void deinit() noexcept override { opened = false; ++closed; }
 };
@@ -130,4 +135,28 @@ void test_relay() {
         REQUIRE(!store.opened && !output.acquired && store.closed == 1);
         REQUIRE(output.released == (failure >= 2 ? 1U : 0U));
     }
+    {
+        using bth::RelayMode;
+        Disk modes; modes.on = true;
+        Store store(modes, events); Output output(events);
+        bth::RelayController relay(output, store);
+        REQUIRE(relay.init() == Status::ok && relay.start() == Status::ok && output.on);
+        REQUIRE(relay.set_mode(RelayMode::unused, true) == Status::ok && !output.on);
+        REQUIRE(relay.set(true) == Status::invalid_state && !output.on);
+        REQUIRE(relay.set_mode(RelayMode::outage, true) == Status::ok && output.on);
+        REQUIRE(relay.automatic(false) == Status::ok && !output.on);
+        REQUIRE(relay.automatic(true) == Status::ok && output.on);
+        REQUIRE(modes.writes == 0 && modes.on);
+        relay.deinit();
+        REQUIRE(relay.init() == Status::ok && relay.start() == Status::ok && !output.on);
+        REQUIRE(relay.state().mode == RelayMode::outage);
+        REQUIRE(relay.set_mode(RelayMode::manual, false) == Status::ok && output.on);
+        REQUIRE(relay.set_mode(static_cast<RelayMode>(3), false) == Status::invalid_argument);
+        store.fail_save = true;
+        REQUIRE(relay.set_mode(RelayMode::unused, false) == Status::hardware_error);
+        REQUIRE(!relay.state().ready && !relay.state().storage_known);
+        REQUIRE(relay.state().mode == RelayMode::manual);
+        relay.deinit();
+    }
+
 }

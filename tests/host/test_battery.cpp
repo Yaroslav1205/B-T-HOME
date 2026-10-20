@@ -43,6 +43,23 @@ void reports(bth::BatteryModule& battery, bool mains, double dc = 12.8, bool val
 void test_battery() {
     {
         Store store; Sink sink;
+        bth::BatteryModule battery(store, sink, {12000, 100000, 1500, 10.5});
+        CHECK_BATTERY(battery.init() == Status::ok && battery.start() == Status::ok);
+        reports(battery, false);
+        CHECK_BATTERY(battery.tick(0) == Status::ok && sink.value.minutes == 7200);
+        CHECK_BATTERY(battery.set_discharge_ma(200) == Status::ok);
+        CHECK_BATTERY(battery.tick(0) == Status::ok && sink.value.minutes == 3600);
+        CHECK_BATTERY(battery.set_discharge_ma(0) == Status::invalid_argument);
+        CHECK_BATTERY(battery.set_discharge_ma(100001) == Status::invalid_argument);
+        for (std::uint64_t now = 1000; now <= 60000; now += 1000) {
+            reports(battery, false); CHECK_BATTERY(battery.tick(now) == Status::ok);
+        }
+        CHECK_BATTERY(sink.value.minutes == 3599);
+        battery.deinit();
+        CHECK_BATTERY(store.charge == full - 200ULL * 60000);
+    }
+    {
+        Store store; Sink sink;
         bth::BatteryModule battery(store, sink, {12000, 100000, 1500, 10.0});
         bth::Runtime runtime;
         CHECK_BATTERY(runtime.add(battery) == Status::ok && runtime.start() == Status::ok);

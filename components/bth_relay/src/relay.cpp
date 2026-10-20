@@ -8,6 +8,9 @@ Status RelayController::init() noexcept {
     auto result = store_.init();
     if (result == Status::ok) { result = store_.load(state_.saved_on); }
     if (result != Status::ok) { state_.error = result; return result; }
+    result = store_.load_mode(state_.mode);
+    if (result == Status::ok && static_cast<unsigned>(state_.mode) > 2) result = Status::invalid_argument;
+    if (result != Status::ok) { state_.error = result; return result; }
     state_.storage_known = true;
     output_acquired_ = true;
     result = output_.init();
@@ -20,17 +23,18 @@ Status RelayController::start() noexcept {
     if (!initialized_ || state_.ready || state_.error != Status::ok) {
         return Status::invalid_state;
     }
-    const auto result = output_.set(state_.saved_on);
+    const bool on = state_.mode == RelayMode::manual && state_.saved_on;
+    const auto result = output_.set(on);
     state_.error = result;
     state_.output_known = result == Status::ok;
     if (result == Status::ok) {
-        state_.on = state_.saved_on;
+        state_.on = on;
         state_.ready = true;
     }
     return result;
 }
 Status RelayController::set(bool on) noexcept {
-    if (!state_.ready) { return Status::invalid_state; }
+    if (!state_.ready || state_.mode != RelayMode::manual) { return Status::invalid_state; }
     if (on == state_.on && on == state_.saved_on) { return Status::ok; }
     // Persist first: a power cut after commit restores the requested state.
     // A failed commit has uncertain durability; refuse further writes until restart.
@@ -48,6 +52,38 @@ Status RelayController::set(bool on) noexcept {
     if (result == Status::ok) { state_.on = on; }
     else { state_.ready = false; }
     return result;
+}
+Status RelayController::automatic(bool absent) noexcept {
+    if (!state_.ready) return Status::invalid_state;
+    if (state_.mode == RelayMode::manual) return Status::ok;
+    const bool on = state_.mode == RelayMode::outage && absent;
+    if (state_.output_known && state_.on == on) return Status::ok;
+    const auto result = output_.set(on);
+    state_.error = result;
+    state_.output_known = result == Status::ok;
+    if (result == Status::ok) state_.on = on;
+    else state_.ready = false;
+    return result;
+}
+Status RelayController::set_mode(RelayMode mode, bool absent) noexcept {
+    if (static_cast<unsigned>(mode) > 2) return Status::invalid_argument;
+    if (!state_.ready) return Status::invalid_state;
+    if (mode == state_.mode) return Status::ok;
+    const auto result = store_.save_mode(mode);
+    if (result != Status::ok) {
+        state_.storage_known = state_.ready = false;
+        state_.error = result;
+        return result;
+    }
+    state_.mode = mode;
+    // Manual mode restores only its saved command, never the automatic output.
+    if (mode != RelayMode::manual) return automatic(absent);
+    const auto applied = output_.set(state_.saved_on);
+    state_.error = applied;
+    state_.output_known = applied == Status::ok;
+    if (applied == Status::ok) state_.on = state_.saved_on;
+    else state_.ready = false;
+    return applied;
 }
 void RelayController::stop() noexcept {
     if (initialized_) {

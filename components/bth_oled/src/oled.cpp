@@ -392,7 +392,7 @@ Status OledModule::start() noexcept {
     active_page_ = 0;
     generation_ = 0;
     page_timed_ = false;
-    splash_active_ = splash_ms_ != 0;
+    splash_active_ = show_details_ && splash_ms_ != 0;
     splash_timed_ = false;
     frame_ = splash_active_ ? render_startup_splash() : render_voltage(0, false);
     auto result = transport_.start_updates();
@@ -471,8 +471,8 @@ Status OledModule::tick(std::uint64_t now_ms) noexcept {
     if (now_ms < battery_at_ || now_ms - battery_at_ >= 2500) battery_ = {};
     const auto status = transport_.poll();
     if (status != Status::ok && status != Status::hardware_error) return status;
-    const unsigned voltage_pages = page_count_ + (show_average_ ? 1 : 0);
-    for (unsigned i = 0; i < voltage_pages; ++i) {
+    const unsigned voltage_readings = page_count_ + (show_average_ ? 1 : 0);
+    for (unsigned i = 0; i < voltage_readings; ++i) {
         auto& page = pages_[i];
         if (page.fresh) {
             page.last_reading_ms = now_ms;
@@ -491,8 +491,12 @@ Status OledModule::tick(std::uint64_t now_ms) noexcept {
     }
     if (!page_timed_) { page_since_ms_ = now_ms; page_timed_ = true; }
     const auto steps = (now_ms - page_since_ms_) / 3000;
-    const unsigned relay_page = voltage_pages + (show_history_ ? 2 : 0);
-    const unsigned ip_page = relay_page + (show_relay_ ? 1 : 0);
+    const bool show_average = show_details_ && show_average_;
+    const bool show_history = show_details_ && show_history_;
+    const bool show_relay = show_details_ && show_relay_;
+    const unsigned voltage_pages = page_count_ + (show_average ? 1 : 0);
+    const unsigned relay_page = voltage_pages + (show_history ? 2 : 0);
+    const unsigned ip_page = relay_page + (show_relay ? 1 : 0);
     const unsigned outage_page = ip_page + (show_ip_ ? 1 : 0);
     const bool show_outages = outages_.state != OutageDisplayState::hidden;
     const unsigned total_pages = outage_page + (show_outages ? 1 : 0);
@@ -501,10 +505,10 @@ Status OledModule::tick(std::uint64_t now_ms) noexcept {
     refresh = refresh || steps != 0 || previous_page != active_page_;
     if (refresh) ++generation_;
     page_since_ms_ += steps * 3000;
-    const bool average_page = show_average_ && active_page_ == 1;
+    const bool average_page = show_average && active_page_ == 1;
     const bool voltage_page = active_page_ < voltage_pages;
     const unsigned data_page = average_page ? page_count_ :
-        active_page_ > 1 && show_average_ ? active_page_ - 1 : active_page_;
+        active_page_ > 1 && show_average ? active_page_ - 1 : active_page_;
     const auto& page = pages_[voltage_page ? data_page : 0];
     const bool valid = page.received && now_ms - page.last_reading_ms < 2500 && page.valid;
     const bool previous = active_page_ == voltage_pages + 1;
@@ -512,7 +516,7 @@ Status OledModule::tick(std::uint64_t now_ms) noexcept {
         ? render_outages(outages_)
         : show_ip_ && active_page_ == ip_page
         ? render_ipv4(ipv4_)
-        : show_relay_ && active_page_ == relay_page
+        : show_relay && active_page_ == relay_page
         ? render_relay(relay_on_, relay_valid_)
         : voltage_page
         ? (data_page == 1 && !average_page && battery_enabled_

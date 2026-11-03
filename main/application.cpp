@@ -179,11 +179,13 @@ void run() {
     NvsAccessStore access_store;
     EspPasswordCodec password_codec;
     AccessSettings access(access_store, password_codec, ap_mac);
+    // Static storage keeps the seven-day ring off the main task stack.
+    static VoltageHistory voltage_history;
 #if CONFIG_BTH_MATTER_ENABLED
     static_assert(board::relay_gpio >= 0 && board::boot_button_gpio >= 0, "Matter requires relay and BOOT GPIOs");
     MatterModule matter(relay_service);
     MatterVoltageOutputs matter_voltages(matter);
-    RelayWeb web(relay_service, access, web_buzzer, web_battery);
+    RelayWeb web(relay_service, access, voltage_history, web_buzzer, web_battery);
     BootButton boot_button(board::boot_button_gpio, board::boot_button_active_low);
 #elif CONFIG_BTH_ZIGBEE_ENABLED
     WifiAp wifi(access);
@@ -192,14 +194,14 @@ void run() {
     ZigbeeModule zigbee(relay_service);
     // The configuration AP never shares the radio with Zigbee.
     OtaService ota;
-    RelayWeb web(relay_service, access, wifi, nullptr, web_buzzer, web_battery, &outage_settings,
+    RelayWeb web(relay_service, access, voltage_history, wifi, nullptr, web_buzzer, web_battery, &outage_settings,
                  std::strcmp(board::id, "esp32c6_rgb8") == 0 ? &ota : nullptr);
     RadioMode radio(zigbee, wifi, web, wifi, access_store);
     BootButton boot_button(board::boot_button_gpio, board::boot_button_active_low);
 #else
     WifiAp wifi(access);
     OtaService ota;
-    RelayWeb web(relay_service, access, wifi, nullptr, web_buzzer, web_battery, &outage_settings,
+    RelayWeb web(relay_service, access, voltage_history, wifi, nullptr, web_buzzer, web_battery, &outage_settings,
                  std::strcmp(board::id, "esp32c6_rgb8") == 0 ? &ota : nullptr);
 #endif
     MainsSink* web_mains = &web;
@@ -230,7 +232,7 @@ void run() {
 #else
                     false
 #endif
-                    );
+                    , false); // Temporarily show only mains, backup, IP and outages.
 #if CONFIG_BTH_WEB_RELAY_ENABLED
     NvsBatteryStore battery_store;
     static constexpr const char* battery_providers[] = {"nvs", "mains", "dc", "battery_settings"};

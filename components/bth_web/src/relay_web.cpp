@@ -92,6 +92,10 @@ Status RelayWeb::init() noexcept {
     return ota_ ? ota_->init() : Status::ok;
 }
 void RelayWeb::report(const MainsReading& reading) noexcept {
+    const auto now = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+    portENTER_CRITICAL(&history_lock_);
+    history_.record(now, reading.volts, reading.valid && reading.calibrated);
+    portEXIT_CRITICAL(&history_lock_);
     voltages_.history = reading.history;
     if (!voltage_queue_) return;
     voltages_.mains = {reading.volts, static_cast<std::uint64_t>(esp_timer_get_time() / 1000),
@@ -125,7 +129,7 @@ Status RelayWeb::start() noexcept {
     if (ota_) { const auto result = ota_->start(); if (result != Status::ok) return result; }
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_uri_handlers = 20;
+    config.max_uri_handlers = 21;
     config.max_open_sockets = 4;
     config.lru_purge_enable = true;
     config.recv_wait_timeout = 3;
@@ -169,6 +173,8 @@ Status RelayWeb::start() noexcept {
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
     uri.method = HTTP_PUT; uri.handler = set_battery;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
+    uri.uri = "/api/voltage-history"; uri.method = HTTP_GET; uri.handler = get_voltage_history;
+    if (httpd_register_uri_handler(server_, &uri) != ESP_OK) return Status::hardware_error;
     uri.uri = "/api/voltages"; uri.method = HTTP_GET; uri.handler = get_voltages;
     if (httpd_register_uri_handler(server_, &uri) != ESP_OK) { return Status::hardware_error; }
     uri.uri = "/api/zigbee"; uri.method = HTTP_GET; uri.handler = get_zigbee;
@@ -245,6 +251,56 @@ esp_err_t RelayWeb::get_state(httpd_req_t* request) {
     auto& self = *static_cast<RelayWeb*>(request->user_ctx);
     if (!self.authorized(request)) { return ESP_OK; }
     return send_state(request, self.relay_.snapshot());
+}
+esp_err_t RelayWeb::get_voltage_history(httpd_req_t* request) {
+    auto& self = *static_cast<RelayWeb*>(request->user_ctx);
+    if (!self.authorized(request)) return ESP_OK;
+    unsigned span = 24 * 12;
+    char query[32]{}, value[8]{};
+    if (httpd_req_get_url_query_len(request)) {
+        if (httpd_req_get_url_query_str(request, query, sizeof(query)) != ESP_OK)
+            return error(request, "400 Bad Request", "invalid_days");
+        if (std::strcmp(query, "hours=2") == 0) {
+            span = 2 * 12;
+        } else {
+            if (httpd_query_key_value(query, "days", value, sizeof(value)) != ESP_OK ||
+                (std::strcmp(value, "1") && std::strcmp(value, "3") && std::strcmp(value, "7")))
+                return error(request, "400 Bad Request", "invalid_days");
+            span = static_cast<unsigned>(value[0] - '0') * 24 * 12;
+        }
+    }
+    const auto now = static_cast<std::uint64_t>(esp_timer_get_time() / 1000);
+    const auto end = static_cast<std::uint32_t>(now / 1000 / VoltageHistory::interval_seconds);
+    const auto first = end > span ? end - span : 0;
+    headers(request);
+    httpd_resp_set_type(request, "application/json");
+    char buffer[1024]{};
+    int used = std::snprintf(buffer, sizeof(buffer),
+        "{\"now_ms\":%llu,\"interval_s\":300,\"points\":[", static_cast<unsigned long long>(now));
+    bool comma = false;
+    for (auto bucket = first; bucket <= end; ++bucket) {
+        portENTER_CRITICAL(&self.history_lock_);
+        const auto point = self.history_.get(bucket);
+        portEXIT_CRITICAL(&self.history_lock_);
+        if (!point.count) continue;
+        // Copy only one record under the lock; formatting/network I/O never holds it.
+        char row[128]{};
+        const int length = std::snprintf(row, sizeof(row), "%s[%llu,%.1f,%.1f,%.1f,%u]",
+            comma ? "," : "", static_cast<unsigned long long>(bucket) * 300000,
+            static_cast<double>(point.sum) / point.count / 10,
+            point.minimum / 10.0, point.maximum / 10.0, unsigned(point.count));
+        if (length < 0 || static_cast<std::size_t>(length) >= sizeof(row)) return ESP_FAIL;
+        if (static_cast<std::size_t>(used + length) >= sizeof(buffer)) {
+            if (httpd_resp_send_chunk(request, buffer, used) != ESP_OK) return ESP_FAIL;
+            used = 0;
+        }
+        std::memcpy(buffer + used, row, length);
+        used += length;
+        comma = true;
+    }
+    if (httpd_resp_send_chunk(request, buffer, used) != ESP_OK ||
+        httpd_resp_send_chunk(request, "]}", 2) != ESP_OK) return ESP_FAIL;
+    return httpd_resp_send_chunk(request, nullptr, 0);
 }
 esp_err_t RelayWeb::get_voltages(httpd_req_t* request) {
     auto& self = *static_cast<RelayWeb*>(request->user_ctx);

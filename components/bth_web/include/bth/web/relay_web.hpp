@@ -10,6 +10,7 @@
 #include "bth/mains/mains.hpp"
 #include "bth/dc/dc.hpp"
 #include "bth/web/voltage.hpp"
+#include "bth/web/voltage_history.hpp"
 #include "bth/oled/oled.hpp"
 #include "freertos/queue.h"
 #include "bth/zigbee/control.hpp"
@@ -18,12 +19,12 @@
 namespace bth {
 class RelayWeb final : public Module, public MainsSink, public DcSink {
 public:
-    RelayWeb(RelayService& relay, AccessSettings& settings, WifiAp& wifi,
+    RelayWeb(RelayService& relay, AccessSettings& settings, VoltageHistory& history, WifiAp& wifi,
              ZigbeeControl* zigbee = nullptr, BuzzerSettings* buzzer = nullptr, BatterySettings* battery = nullptr, OutageSettings* outages = nullptr, OtaService* ota = nullptr) noexcept
-        : relay_(relay), settings_(settings), wifi_(&wifi), zigbee_(zigbee), buzzer_(buzzer), battery_(battery), outages_(outages), ota_(ota) {}
+        : relay_(relay), settings_(settings), history_(history), wifi_(&wifi), zigbee_(zigbee), buzzer_(buzzer), battery_(battery), outages_(outages), ota_(ota) {}
     // Matter owns Wi-Fi provisioning; this web server only edits web credentials.
-    RelayWeb(RelayService& relay, AccessSettings& settings, BuzzerSettings* buzzer = nullptr, BatterySettings* battery = nullptr) noexcept
-        : relay_(relay), settings_(settings), buzzer_(buzzer), battery_(battery) {}
+    RelayWeb(RelayService& relay, AccessSettings& settings, VoltageHistory& history, BuzzerSettings* buzzer = nullptr, BatterySettings* battery = nullptr) noexcept
+        : relay_(relay), settings_(settings), history_(history), buzzer_(buzzer), battery_(battery) {}
     const char* id() const noexcept override { return "web"; }
     Dependencies dependencies() const noexcept override {
         return wifi_ ? Dependencies{required_, zigbee_ ? 4U : 3U} : Dependencies{matter_required_, 3};
@@ -47,6 +48,7 @@ private:
     static esp_err_t set_zigbee(httpd_req_t* request);
     static esp_err_t page(httpd_req_t* request);
     static esp_err_t get_state(httpd_req_t* request);
+    static esp_err_t get_voltage_history(httpd_req_t* request);
     static esp_err_t get_voltages(httpd_req_t* request);
     static esp_err_t set_state(httpd_req_t* request);
     static esp_err_t set_relay_mode(httpd_req_t* request);
@@ -66,6 +68,8 @@ private:
     bool authorized(httpd_req_t* request) noexcept;
     RelayService& relay_;
     AccessSettings& settings_;
+    VoltageHistory& history_;
+    portMUX_TYPE history_lock_ = portMUX_INITIALIZER_UNLOCKED;
     WifiAp* wifi_ = nullptr;
     ZigbeeControl* zigbee_ = nullptr;
     BuzzerSettings* buzzer_ = nullptr;

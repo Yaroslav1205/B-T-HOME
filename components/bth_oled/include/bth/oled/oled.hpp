@@ -81,9 +81,10 @@ public:
     explicit OledModule(OledTransport& transport, std::uint8_t contrast, unsigned page_count = 1,
                                                 std::uint32_t splash_ms = 0, bool show_history = false,
                                                 bool show_average = false, bool show_relay = false,
-                                                bool show_ip = false) noexcept
+                                                bool show_ip = false, bool show_details = true) noexcept
         : transport_(transport), contrast_(contrast), page_count_(page_count), splash_ms_(splash_ms),
-                    show_history_(show_history), show_average_(show_average), show_relay_(show_relay), show_ip_(show_ip) {}
+                    show_history_(show_history), show_average_(show_average), show_relay_(show_relay), show_ip_(show_ip),
+                    show_details_(show_details) {}
     const char* id() const noexcept override { return "oled"; }
     // Runtime task only. Copies a reading; does not access I2C.
     void report(const MainsReading& reading) noexcept override;
@@ -118,6 +119,8 @@ private:
     const bool show_average_;
     const bool show_relay_;
     const bool show_ip_;
+    // Hide splash, average, history and relay pages without suppressing readings.
+    const bool show_details_;
     std::array<std::uint8_t, 4> ipv4_{};
     bool relay_on_ = false, relay_valid_ = false;
     MainsHistory history_{};

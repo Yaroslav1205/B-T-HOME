@@ -53,7 +53,21 @@ summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
 .voltage-status{display:block;font-size:12px;color:var(--muted);margin-top:6px;min-height:32px}
 .voltages .wide{grid-column:1/-1}.reading-value{font-size:18px;font-weight:600;overflow-wrap:anywhere}
 .device-info{margin:0}.device-info dt{font-size:13px;color:var(--muted);margin-bottom:8px}.device-info dd{margin:0;font-family:ui-monospace,monospace;font-size:16px;overflow-wrap:anywhere;user-select:all}
+.history-card{width:min(760px,calc(100vw - 48px));position:relative;left:50%;transform:translateX(-50%)}
+.history-header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}.history-header h2{margin-bottom:12px}
+#historyScale{font-size:12px;color:var(--accent);font-variant-numeric:tabular-nums}
+.chart-controls{display:flex;align-items:end;gap:8px;flex-wrap:wrap}.chart-controls label{flex:1;min-width:160px}
+.chart-buttons{display:flex;gap:6px}.chart-buttons button{width:auto;min-width:44px;min-height:44px;padding:10px 12px;background:var(--secondary);color:var(--secondary-text);font-size:14px}
+.chart-shell{margin-top:18px;background:var(--bg);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+#voltageChart{display:block;width:100%;height:260px;touch-action:none;user-select:none;cursor:crosshair;outline-offset:-3px}
+#voltageChart[data-dragging=true]{cursor:grabbing}#voltageChart:focus-visible{outline:2px solid var(--focus)}
+.chart-legend{display:flex;gap:16px;padding:0 16px 12px;font-size:12px;color:var(--muted)}
+.chart-legend span::before{content:"";display:inline-block;width:16px;height:3px;background:var(--accent);margin:0 6px 3px 0;border-radius:2px}
+.chart-legend span+span::before{height:9px;opacity:.25;margin-bottom:0}
+#historyDetail{padding:12px 14px;background:var(--notice);color:var(--notice-text);border-radius:12px;font-variant-numeric:tabular-nums;min-height:64px}
+#historyHelp{display:block;margin-top:12px}
 @media(max-width:380px){body{padding:16px}article{padding:24px}}
+@media(max-width:380px){.history-card{width:calc(100vw - 32px);padding:18px}.chart-buttons button{padding:10px}}
 </style>
 </head>
 <body>
@@ -90,6 +104,21 @@ summary{font-weight:650;cursor:pointer}details[open] summary{margin-bottom:20px}
 <div><dt>Основне живлення зараз</dt><dd><span id="currentDuration" class="voltage-value">—</span><span id="currentPower" class="voltage-status">Очікуємо вимірювання</span></dd></div>
 <div><dt>Попередній період</dt><dd><span id="previousDuration" class="voltage-value">—</span><span id="previousPower" class="voltage-status">Ще немає даних</span></dd></div>
 </dl>
+</article>
+<article class="history-card" aria-labelledby="historyHeading">
+<div class="history-header"><h2 id="historyHeading">Історія напруги мережі</h2><span id="historyScale">Увесь період</span></div>
+<div class="chart-controls">
+<label>Період<select id="historyDays"><option value="2h">Останні 2 години</option><option value="1" selected>Остання доба</option><option value="3">Останні 3 доби</option><option value="7">Останні 7 діб</option></select></label>
+<div class="chart-buttons" role="group" aria-label="Масштаб графіка"><button id="historyZoomOut" type="button" aria-label="Віддалити графік" disabled>−</button><button id="historyZoomIn" type="button" aria-label="Наблизити графік" disabled>+</button><button id="historyReset" type="button" disabled>Скинути</button></div>
+</div>
+<div class="chart-shell">
+<svg id="voltageChart" viewBox="0 0 360 260" tabindex="0" role="img" aria-label="Інтерактивний графік основної напруги" aria-describedby="historyHelp historyDetail"></svg>
+<div class="chart-legend" aria-hidden="true"><span>Середня</span><span>Мін. — макс.</span></div>
+</div>
+<p id="historySummary" class="feedback" role="status">Завантаження історії…</p>
+<p id="historyDetail" class="feedback">Торкніться графіка, щоб переглянути значення.</p>
+<small id="historyHelp">Розведіть два пальці або прокрутіть колесо над графіком, щоб наблизити. Перетягуйте, щоб рухатися в часі. Клавіатура: + / −, стрілки ← →, Home — скинути.</small>
+<small>Лінія — середня; смуги — мінімум і максимум за 5 хв. Розриви — немає вимірів. Час приблизний, за годинником браузера. Історія до 7 діб зберігається на пристрої до перезавантаження.</small>
 </article>
 <article aria-labelledby="relayHeading">
 <details id="relayPanel"><summary id="relayHeading">Керування реле</summary>
@@ -220,6 +249,172 @@ const button=element('toggle'),title=element('state'),detail=element('detail');
 const connection=element('connection'),message=element('message');
 const app=element('app'),loginCard=element('loginCard'),notice=element('notice');
 let current=null,busy=false,changing=false,signedIn=false;
+let historyData=null,historyLoadedAt=0,historyBusy=false,historyGeneration=0;
+let historyView=null,historySelection=null,historyFrame=0,historyGesture=null;
+const historyPointers=new Map(),historyChart=element('voltageChart');
+const historyBucket=300000,historyMinSpan=900000;
+function historyTime(ms){return new Date(ms).toLocaleString('uk-UA',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}
+function historyBounds(){const end=historyData.now_ms;return {start:end-historyData.days*86400000,end};}
+function historyWindow(){return historyView||historyBounds();}
+function constrainHistory(start,span){
+  const bounds=historyBounds(),full=bounds.end-bounds.start;
+  span=Math.max(Math.min(historyMinSpan,full),Math.min(full,span));
+  start=Math.max(bounds.start,Math.min(bounds.end-span,start));
+  return span>=full-1?null:{start,end:start+span};
+}
+function queueHistoryDraw(){if(!historyFrame)historyFrame=requestAnimationFrame(()=>{historyFrame=0;drawHistory();});}
+function changeHistoryWindow(start,span){
+  historyView=constrainHistory(start,span);historySelection=null;queueHistoryDraw();
+}
+function zoomHistory(factor,anchor=.5){
+  if(!historyData||!historyData.points.length)return;
+  const view=historyWindow(),span=view.end-view.start;
+  const next=Math.max(historyMinSpan,Math.min(historyData.days*86400000,span*factor));
+  changeHistoryWindow(view.start+span*anchor-next*anchor,next);
+}
+function resetHistoryGesture(){
+  const ids=[...historyPointers.keys()];historyPointers.clear();historyGesture=null;
+  historyChart.dataset.dragging='false';
+  for(const id of ids)if(historyChart.hasPointerCapture(id))historyChart.releasePointerCapture(id);
+}
+function resetHistoryView(){resetHistoryGesture();historyView=null;historySelection=null;drawHistory();}
+function historyFraction(clientX){
+  const box=historyChart.getBoundingClientRect();
+  return Math.max(0,Math.min(1,(clientX-box.left-44)/Math.max(1,box.width-60)));
+}
+function selectHistory(clientX){
+  const view=historyWindow();historySelection=view.start+(view.end-view.start)*historyFraction(clientX);queueHistoryDraw();
+}
+function drawHistory(){
+  const svg=historyChart;svg.replaceChildren();
+  const hasData=!!historyData?.points.length;
+  element('historyZoomIn').disabled=!hasData||(historyView&&historyView.end-historyView.start<=historyMinSpan+1);
+  element('historyZoomOut').disabled=!hasData||!historyView;
+  element('historyReset').disabled=!historyView;
+  element('historyScale').textContent=historyView?(historyData.days*86400000/(historyView.end-historyView.start)).toFixed(1)+'×':'Увесь період';
+  element('historyDetail').textContent='Торкніться графіка або наведіть курсор, щоб переглянути значення.';
+  if(!historyData)return;
+  const {points,now_ms,wallTime}=historyData,{start,end}=historyWindow(),span=end-start;
+  const width=Math.max(240,svg.clientWidth),plotWidth=width-60;
+  svg.setAttribute('viewBox','0 0 '+width+' 260');
+  const shown=points.filter(p=>p[0]+historyBucket>start&&p[0]<=end);
+  // Include adjacent samples so a continuous line enters the clipped viewport correctly.
+  const linePoints=points.filter(p=>p[0]+historyBucket*1.5>=start&&p[0]<=end+historyBucket);
+  const scalePoints=linePoints.length?linePoints:shown;
+  const min=scalePoints.length?Math.min(...scalePoints.map(p=>p[2])):210;
+  const max=scalePoints.length?Math.max(...scalePoints.map(p=>p[3])):250;
+  const padding=Math.max(5,(max-min)*.12),low=Math.max(0,Math.floor((min-padding)/5)*5),high=Math.ceil((max+padding)/5)*5;
+  const x=t=>Math.round((44+(t-start)/span*plotWidth)*100)/100,y=v=>Math.round((204-(v-low)/(high-low)*180)*100)/100;
+  const sampleTime=p=>Math.min(now_ms,p[0]+historyBucket/2);
+  const add=(tag,attrs,text,parent=svg)=>{const node=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,v);if(text!==undefined)node.textContent=text;parent.append(node);return node;};
+  const defs=add('defs',{}),clip=add('clipPath',{id:'historyClip'},undefined,defs);
+  add('rect',{x:44,y:20,width:plotWidth,height:188},undefined,clip);
+  for(let i=0;i<=4;i++){const v=low+(high-low)*i/4;add('line',{x1:44,x2:width-16,y1:y(v),y2:y(v),stroke:'var(--border)','stroke-dasharray':'3 5'});add('text',{x:36,y:y(v)+4,'text-anchor':'end',fill:'var(--muted)','font-size':11},Math.round(v));}
+  add('text',{x:16,y:14,fill:'var(--muted)','font-size':11},'В');
+  const ticks=width<400?2:4;
+  for(let i=0;i<=ticks;i++){
+    const t=start+span*i/ticks,date=new Date(wallTime+t-now_ms),anchor=i===0?'start':i===ticks?'end':'middle';
+    add('text',{x:x(t),y:225,'text-anchor':anchor,fill:'var(--text)','font-size':11},date.toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit'}));
+    add('text',{x:x(t),y:244,'text-anchor':anchor,fill:'var(--muted)','font-size':10},date.toLocaleDateString('uk-UA',{day:'2-digit',month:'2-digit'}));
+  }
+  const plot=add('g',{'clip-path':'url(#historyClip)'});
+  let path='',rangePath='',previous=null;
+  for(const p of shown){
+    const left=x(p[0]),right=x(Math.min(now_ms,p[0]+historyBucket));
+    rangePath+='M'+left+','+y(p[3])+'h'+Math.max(1,right-left).toFixed(2)+'v'+Math.max(1,y(p[2])-y(p[3])).toFixed(2)+'H'+left+'Z';
+  }
+  // One range path keeps week-long histories responsive during touch gestures.
+  add('path',{d:rangePath,fill:'var(--accent)','fill-opacity':.16},undefined,plot);
+  for(const p of linePoints){
+    const px=x(sampleTime(p));
+    path+=(previous&&p[0]-previous[0]===historyBucket?'L':'M')+px+','+y(p[1]);
+    if(linePoints.length<plotWidth/3||!previous||p[0]-previous[0]!==historyBucket)
+      add('circle',{cx:px,cy:y(p[1]),r:span<=7200000?2.5:1.4,fill:'var(--accent)'},undefined,plot);
+    previous=p;
+  }
+  add('path',{'data-series':'average',d:path,fill:'none',stroke:'var(--accent)','stroke-width':2,'stroke-linejoin':'round','stroke-linecap':'round'},undefined,plot);
+  if(!shown.length)add('text',{x:44+plotWidth/2,y:110,'text-anchor':'middle',fill:'var(--muted)','font-size':12},'Немає вимірів у цьому вікні');
+  if(historySelection!==null&&historySelection>=start&&historySelection<=end){
+    const bucket=Math.floor(historySelection/historyBucket)*historyBucket,p=points.find(p=>p[0]===bucket);
+    const px=x(p?sampleTime(p):historySelection);
+    add('line',{x1:px,x2:px,y1:20,y2:208,stroke:'var(--accent)','stroke-opacity':.6,'stroke-dasharray':'4 4'},undefined,plot);
+    if(p)add('circle',{cx:px,cy:y(p[1]),r:5,fill:'var(--surface)',stroke:'var(--accent)','stroke-width':2},undefined,plot);
+    element('historyDetail').textContent=p?historyTime(wallTime+p[0]-now_ms)+' · сер. '+p[1].toFixed(1)+' В · мін. '+p[2].toFixed(1)+' В · макс. '+p[3].toFixed(1)+' В · '+p[4]+' вимірів':historyTime(wallTime+historySelection-now_ms)+' · немає вимірів';
+  }
+  element('historySummary').textContent=shown.length?'Мінімум '+Math.min(...shown.map(p=>p[2])).toFixed(1)+' В · максимум '+Math.max(...shown.map(p=>p[3])).toFixed(1)+' В':'Ще немає достовірних вимірів за цей період.';
+}
+async function loadHistory(force=false){
+  if(!signedIn||historyBusy||(!force&&Date.now()-historyLoadedAt<60000))return;
+  historyBusy=true;const generation=historyGeneration,range=element('historyDays').value,days=range==='2h'?2/24:Number(range);
+  try{
+    const result=await api('/api/voltage-history?'+(range==='2h'?'hours=2':'days='+days));
+    if(generation!==historyGeneration||!signedIn)return;
+    if(result.status===401){showLogin();return;}
+    if(!result.ok)throw Error('history');
+    const restarted=historyData&&result.data.now_ms<historyData.now_ms;
+    historyData={...result.data,wallTime:Date.now(),days};
+    if(restarted){resetHistoryGesture();historyView=null;historySelection=null;}
+    if(historyView)historyView=constrainHistory(historyView.start,historyView.end-historyView.start);
+    historyLoadedAt=Date.now();drawHistory();
+  }catch{if(generation===historyGeneration)element('historySummary').textContent='Не вдалося оновити історію. Повторна спроба автоматично.';historyLoadedAt=Date.now()-45000;}
+  finally{historyBusy=false;if(signedIn&&generation!==historyGeneration)void loadHistory(true);}
+}
+element('historyDays').addEventListener('change',()=>{historyGeneration++;historyLoadedAt=0;historyData=null;resetHistoryView();element('historySummary').textContent='Завантаження історії…';void loadHistory(true);});
+element('historyZoomIn').addEventListener('click',()=>zoomHistory(.5));
+element('historyZoomOut').addEventListener('click',()=>zoomHistory(2));
+element('historyReset').addEventListener('click',resetHistoryView);
+historyChart.addEventListener('wheel',event=>{
+  if(!historyData?.points.length||!event.deltaY)return;
+  event.preventDefault();resetHistoryGesture();
+  const delta=event.deltaY*(event.deltaMode===1?16:event.deltaMode===2?260:1);
+  zoomHistory(Math.exp(Math.max(-1,Math.min(1,delta*.002))),historyFraction(event.clientX));
+},{passive:false});
+historyChart.addEventListener('keydown',event=>{
+  if(!historyData?.points.length)return;
+  const view=historyWindow(),span=view.end-view.start;
+  if(event.key==='+'||event.key==='=')zoomHistory(.5);
+  else if(event.key==='-')zoomHistory(2);
+  else if(event.key==='Home')resetHistoryView();
+  else if(event.key==='ArrowLeft'||event.key==='ArrowRight')changeHistoryWindow(view.start+span*(event.key==='ArrowLeft'?-.2:.2),span);
+  else return;
+  event.preventDefault();
+});
+function beginHistoryGesture(moved=false){
+  if(!historyPointers.size){historyGesture=null;return;}
+  const positions=[...historyPointers.values()],a=positions[0],b=positions[1];
+  historyGesture={view:{...historyWindow()},center:b?(a.x+b.x)/2:a.x,distance:b?Math.hypot(a.x-b.x,a.y-b.y):0,moved:moved||!!b};
+}
+historyChart.addEventListener('pointerdown',event=>{
+  if(!historyData?.points.length||event.button!==0)return;
+  historyPointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+  beginHistoryGesture(historyGesture?.moved);historyChart.dataset.dragging='true';
+  try{historyChart.setPointerCapture(event.pointerId);}catch{}
+});
+historyChart.addEventListener('pointermove',event=>{
+  if(!historyData)return;
+  if(!historyPointers.has(event.pointerId)){if(event.pointerType==='mouse'&&!historyPointers.size)selectHistory(event.clientX);return;}
+  historyPointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+  const positions=[...historyPointers.values()],a=positions[0],b=positions[1],gesture=historyGesture;
+  if(!gesture)return;
+  const center=b?(a.x+b.x)/2:a.x,span=gesture.view.end-gesture.view.start;
+  if(!b&&!gesture.moved&&Math.abs(center-gesture.center)<4)return;
+  gesture.moved=true;
+  const distance=b?Math.hypot(a.x-b.x,a.y-b.y):0;
+  const next=b&&gesture.distance>0?Math.max(historyMinSpan,Math.min(historyData.days*86400000,span*gesture.distance/Math.max(1,distance))):span;
+  const anchor=gesture.view.start+span*historyFraction(gesture.center);
+  changeHistoryWindow(anchor-next*historyFraction(center),next);
+});
+function endHistoryPointer(event){
+  if(!historyPointers.has(event.pointerId))return;
+  const tap=event.type==='pointerup'&&historyPointers.size===1&&!historyGesture?.moved;
+  historyPointers.delete(event.pointerId);
+  if(historyChart.hasPointerCapture(event.pointerId))historyChart.releasePointerCapture(event.pointerId);
+  if(tap)selectHistory(event.clientX);
+  beginHistoryGesture(true);historyChart.dataset.dragging=historyPointers.size?'true':'false';
+}
+for(const type of ['pointerup','pointercancel','lostpointercapture'])historyChart.addEventListener(type,endHistoryPointer);
+window.addEventListener('blur',resetHistoryGesture);
+new ResizeObserver(queueHistoryDraw).observe(historyChart);
 let displayExpiry=0;
 const voltageExpiry={mains:0,battery:0};
 const voltageLabels={waiting:'Очікуємо вимірювання',uncalibrated:'Потрібне калібрування',invalid:'Недійсне вимірювання',stale:'Немає свіжих даних'};
@@ -287,6 +482,7 @@ setInterval(()=>{
 },250);
 function notify(text){notice.textContent=text;notice.hidden=!text;}
 function showLogin(text=''){
+  historyGeneration++;historyLoadedAt=0;historyData=null;resetHistoryView();element('historyDetail').textContent='';
   element('outageFields').disabled=true;element('outageGroup').value='';
   element('buzzerFields').disabled=true;element('buzzerInterval').value='';
   element('batteryFields').disabled=true;element('batteryCurrent').value='';
@@ -568,7 +764,7 @@ element('otaCheck').addEventListener('click',()=>otaAction('check'));
 element('otaInstall').addEventListener('click',()=>otaAction('install'));
 async function refresh(){
   if(busy)return;busy=true;
-  try{const result=await request();if(result){show(result.state);if(result.state.ready){message.className='';message.textContent='';}await loadVoltages();await loadZigbee();await loadOta();}}
+  try{const result=await request();if(result){show(result.state);if(result.state.ready){message.className='';message.textContent='';}await loadVoltages();void loadHistory();await loadZigbee();await loadOta();}}
   catch{offline();}finally{busy=false;}
 }
 button.addEventListener('click',async()=>{
@@ -591,7 +787,7 @@ element('loginForm').addEventListener('submit',async event=>{
     const result=await api('/api/login',mutation('POST',{username:element('loginUser').value,password:element('loginPassword').value}));
     element('loginPassword').value='';
     if(!result.ok){feedback.className='feedback error';feedback.textContent=result.status===429?'Забагато спроб. Зачекайте 30 секунд.':'Неправильний логін або пароль.';return;}
-    const state=await request();if(state){show(state.state);await loadVoltages();await loadZigbee();if(signedIn)await loadSettings();notify('');}
+    const state=await request();if(state){show(state.state);await loadVoltages();void loadHistory();await loadZigbee();if(signedIn)await loadSettings();notify('');}
   }catch{feedback.className='feedback error';feedback.textContent='Пристрій не відповідає. Перевірте Wi-Fi.';}
   finally{busy=false;element('loginButton').disabled=false;}
 });

@@ -47,6 +47,50 @@ bool pixel(const bth::OledFrame& frame, int x, int y) {
 }
 
 void test_oled() {
+    // Reduced display rotation retains hidden readings for the web panel.
+    {
+        FakeTransport bus;
+        bth::OledModule oled(bus, 0x8f, 2, 2000, true, true, true, true, false);
+        CHECK_OLED(oled.init() == Status::ok && oled.start() == Status::ok);
+        CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false));
+        const bth::OutageDisplay schedule{bth::OutageDisplayState::interval, 2, 480, 600};
+        const std::array<std::uint8_t, 4> address{192, 168, 1, 12};
+        const bth::BatteryEstimate battery{725, true, true, false};
+        oled.report_ipv4(address);
+        oled.report_outages(schedule);
+        oled.report_relay(true, true);
+        for (unsigned step = 0; step < 8; ++step) {
+            bth::MainsReading reading{};
+            reading.valid = reading.calibrated = true;
+            reading.volts = 230 + step * 2;
+            oled.report(reading);
+            CHECK_OLED(oled.report_value(1, 12.4, true) == Status::ok);
+            oled.report_battery(battery);
+            const auto now = step * 3000;
+            CHECK_OLED(oled.tick(now) == Status::ok);
+            const bth::OledFrame expected[] = {
+                bth::render_voltage(reading.volts, true),
+                bth::render_battery(12.4, true, battery),
+                bth::render_ipv4(address), bth::render_outages(schedule)
+            };
+            CHECK_OLED(bus.frames.back() == expected[step % 4]);
+            const auto copy = oled.readings(now);
+            CHECK_OLED(copy.average_valid && copy.average_volts == 230 + step);
+            CHECK_OLED(copy.relay_valid && copy.relay_on);
+        }
+        // Disabling the schedule while it is visible returns to mains.
+        oled.report_outages({});
+        CHECK_OLED(oled.tick(21020) == Status::ok);
+        CHECK_OLED(bus.frames.back() == bth::render_voltage(244, true));
+        CHECK_OLED(!oled.readings(23500).average_valid);
+        CHECK_OLED(oled.tick(24000) == Status::ok);
+        CHECK_OLED(bus.frames.back() == bth::render_battery(0, false, {}));
+        CHECK_OLED(oled.tick(27000) == Status::ok);
+        CHECK_OLED(bus.frames.back() == bth::render_ipv4(address));
+        CHECK_OLED(oled.tick(30000) == Status::ok);
+        CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false));
+        oled.deinit();
+    }
     {
         FakeTransport bus;
         bth::OledModule oled(bus, 0x8f, 2, 0, true, true, true, true);

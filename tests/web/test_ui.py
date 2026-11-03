@@ -12,6 +12,9 @@ window.mockSettings={ssid:'B-T HOME 1BA4',username:'admin',wifi_pending:false};
 window.mockPassword='admin';window.mockWifiPassword='12345678';
 window.mockVoltages={mains:{volts:230.5,status:'ok',age_ms:0},battery:{volts:12.4,status:'ok',age_ms:0},current_period:{present:true,duration_ms:120000},previous_period:{present:false,duration_ms:7200000}};
 window.mockVoltageFail=false;
+window.mockHistory={now_ms:900000,interval_s:300,points:[[0,230,210,250,300],[300000,0,0,0,300],[900000,240,239,241,1]]};
+window.lastHistoryUrl='';window.historyCalls=0;window.historyFail=false;
+
 window.mockZigbee={state:'idle',channel:0,seconds_left:0};window.zigbeeWrites=0;window.mockZigbeeFail=false;
 window.mockConfirm=true;window.confirm=()=>mockConfirm;
 window.mockBuzzer={available:true,interval_seconds:20};window.buzzerWrites=0;window.mockBuzzerFail=false;
@@ -80,6 +83,7 @@ window.fetch=async function(url,options){
   }
   return reply(200,mockZigbee);
  }
+ if(url.startsWith('/api/voltage-history?')){historyCalls++;lastHistoryUrl=url;return reply(historyFail?503:200,mockHistory);}
  if(url==='/api/voltages')return reply(mockVoltageFail?503:200,mockVoltages);
  if(url==='/api/settings'){
   if(options.method==='PUT'){
@@ -120,7 +124,72 @@ CHECKS = r"""
   button.click();check(writeCalls===0,'no unauthenticated UI command');
   await signIn('admin','wrong');check(!signedIn&&!loginCard.hidden,'wrong password');
   await signIn('admin','admin');check(signedIn&&!app.hidden&&!current.on,'default login');
-  check(element('batteryCurrent').value==='58'&&!element('batteryFields').disabled,'battery current loaded');
+  await loadHistory(true);
+  check(historyData.points.length===3&&element('voltageChart').querySelectorAll('circle').length===3,'history rendered');
+  check(element('voltageChart').querySelector('[data-series=average]').getAttribute('d').split('M').length===3,'missing history bucket breaks line');
+  // Headless virtual time can defer animation frames; flush chart rendering explicitly.
+  const chart=element('voltageChart'),box=chart.getBoundingClientRect();
+  const wheel=(delta,x)=>chart.dispatchEvent(new WheelEvent('wheel',{deltaY:delta,clientX:x,cancelable:true}));
+  const pointer=(type,id,x,y=box.top+80,pointerType='touch')=>chart.dispatchEvent(new PointerEvent(type,{pointerId:id,clientX:x,clientY:y,button:0,pointerType,bubbles:true}));
+  const left=box.left+44,right=box.right-16,center=Math.round((left+right)/2);
+  const span=()=>historyWindow().end-historyWindow().start;
+  const fullSpan=span(),gestureCalls=historyCalls;
+  wheel(-300,center);await wait(30);drawHistory();
+  const anchor=historyFraction(center);
+  check(span()<fullSpan&&Math.abs(historyView.start+span()*anchor-historyBounds().start-fullSpan*anchor)<1,'wheel zoom anchored at cursor');
+  const zoomedSpan=span(),beforePan=historyView.start;
+  pointer('pointerdown',1,center);pointer('pointermove',1,center+30);pointer('pointerup',1,center+30);await wait(30);drawHistory();
+  check(historyView.start<beforePan&&Math.abs(span()-zoomedSpan)<1,'one finger pans time without zoom');
+  pointer('pointerdown',1,center-30);pointer('pointerdown',2,center+30);
+  pointer('pointermove',1,center-60);pointer('pointermove',2,center+60);await wait(30);drawHistory();
+  check(span()<zoomedSpan*.6,'two finger pinch zooms');
+  pointer('pointercancel',2,center+60);pointer('pointerup',1,center-60);
+  check(historyPointers.size===0&&historyGesture===null,'cancelled gesture cleans up');
+  const fixedView={...historyView};await loadHistory(true);
+  check(historyView.start===fixedView.start&&historyView.end===fixedView.end,'refresh preserves viewport');
+  element('historyReset').click();await wait(30);drawHistory();check(historyView===null&&span()===fullSpan,'reset restores entire period');
+  wheel(-1000,right+2);await wait(30);drawHistory();check(historyView.end===historyData.now_ms,'right edge remains anchored');
+  for(let i=0;i<20;i++)wheel(-1000,right+2);
+  await wait(30);drawHistory();check(span()===900000&&element('historyZoomIn').disabled,'zoom stops at fifteen minutes');
+  const viewBeforeCancel={...historyView};
+  pointer('pointerdown',3,center);pointer('lostpointercapture',3,center);pointer('pointermove',3,center+80);
+  check(historyView.start===viewBeforeCancel.start&&historyPointers.size===0,'lost capture stops dragging');
+  pointer('pointerdown',4,center);window.dispatchEvent(new Event('blur'));
+  check(historyPointers.size===0,'window blur cancels gesture');
+  // Tap a missing bucket after zoom: it must not select a neighboring measurement.
+  const missingX=left+(750000-historyView.start)/span()*(right-left);
+  pointer('pointerdown',5,missingX);pointer('pointerup',5,missingX);await wait(30);drawHistory();
+  check(element('historyDetail').textContent.includes('немає вимірів'),'zoomed gap hit testing');
+  const sampleX=left+(450000-historyView.start)/span()*(right-left);
+  pointer('pointerdown',6,sampleX);pointer('pointerup',6,sampleX);await wait(30);drawHistory();
+  check(element('historyDetail').textContent.includes('сер. 0.0 В'),'zoomed sample hit testing retains zero voltage');
+  pointer('pointerdown',7,center,box.top+80,'mouse');pointer('pointermove',7,center+10000,box.top+80,'mouse');pointer('pointerup',7,center+10000,box.top+80,'mouse');await wait(30);drawHistory();
+  check(historyView.start>=historyBounds().start&&historyView.end<=historyBounds().end,'pan constrained to selected range');
+  chart.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',cancelable:true}));await wait(30);drawHistory();
+  check(historyView===null,'keyboard reset');
+  element('historyZoomIn').click();await wait(30);drawHistory();check(span()===fullSpan/2,'zoom button');
+  const keyboardStart=historyView.start;
+  chart.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',cancelable:true}));await wait(30);drawHistory();
+  check(historyView.start<keyboardStart,'keyboard pan');
+  wheel(1000,center);await wait(30);drawHistory();check(historyView===null,'zoom out cannot exceed full period');
+  check(historyCalls===gestureCalls+1,'gestures do not request history from firmware');
+  // A device restart resets the old uptime viewport and any active gesture.
+  wheel(-300,center);const originalNow=mockHistory.now_ms;mockHistory.now_ms=600000;
+  await loadHistory(true);check(historyView===null,'device restart resets viewport');mockHistory.now_ms=originalNow;await loadHistory(true);
+  const calls=historyCalls;await loadHistory();check(historyCalls===calls,'history throttled independently of live readings');
+  for(const days of ['2h','3','7','1']){
+    element('historyZoomIn').click();
+    element('historyDays').value=days;element('historyDays').dispatchEvent(new Event('change'));await wait(30);
+    check(historyView===null&&historySelection===null,'range change resets viewport');
+    check(historyData.days===(days==='2h'?2/24:Number(days)),'history range selection');
+    check(lastHistoryUrl==='/api/voltage-history?'+(days==='2h'?'hours=2':'days='+days),'history API range');
+  }
+  historyFail=true;await loadHistory(true);check(historyData.points.length===3,'history retained after network error');historyFail=false;
+  const savedPoints=mockHistory.points;mockHistory.points=[];await loadHistory(true);
+  check(element('voltageChart').querySelectorAll('circle').length===0,'empty history');
+  check(element('historyZoomIn').disabled&&element('historyZoomOut').disabled,'empty chart controls disabled');
+  mockHistory.points=savedPoints;await loadHistory(true);
+  check(element('batteryCurrent').value==='58' &&!element('batteryFields').disabled,'battery current loaded');
   element('batteryCurrent').value='1000';submit('batteryForm');await wait(50);
   check(mockBattery.discharge_ma===1000&&batteryWrites===1,'battery current saved');
   await loadSettings();check(element('batteryCurrent').value==='1000','battery current restored');
@@ -270,6 +339,7 @@ CHECKS = r"""
   mockAuthorized=false;await refresh();check(!signedIn&&app.hidden,'expired session');
   await signIn('owner','new-password');element('logout').click();await wait(100);
   check(!mockAuthorized&&app.hidden&&!loginCard.hidden,'logout');
+  check(historyData===null&&!element('voltageChart').children.length,'logout clears history');
   check(element('batteryVoltage').textContent==='—','logout clears voltages');
   await signIn('owner','new-password');await loadOta();
   check(!element('otaCheck').disabled&&element('otaInstall').disabled,'OTA idle');

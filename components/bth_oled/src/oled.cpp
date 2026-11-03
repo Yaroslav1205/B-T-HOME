@@ -109,7 +109,8 @@ OledFrame render_mains_period(const MainsPeriod& period, bool previous) noexcept
     const auto days = total_minutes / (24 * 60);
     const auto hours = total_minutes / 60 % 24;
     const auto minutes = total_minutes % 60;
-    char text[16]{};
+    // Also fits GCC's conservative range analysis for the 64-bit day count.
+    char text[32]{};
     std::snprintf(text, sizeof(text), "%03llu:%02llu:%02llu",
                   static_cast<unsigned long long>(days),
                   static_cast<unsigned long long>(hours),

@@ -311,6 +311,8 @@ void test_oled() {
         constexpr std::uint64_t max_duration_ms = (999ULL * 24 * 60 + 1439) * 60000;
         CHECK_OLED(bth::render_mains_period({max_duration_ms,true,true}, false) ==
                bth::render_mains_period({max_duration_ms + 60000,true,true}, false));
+        CHECK_OLED(bth::render_mains_period({max_duration_ms,true,true}, false) ==
+               bth::render_mains_period({std::numeric_limits<std::uint64_t>::max(),true,true}, false));
         runtime.stop();
         CHECK_OLED(runtime.start() == Status::ok && runtime.tick(0) == Status::ok);
         CHECK_OLED(runtime.tick(9000) == Status::ok);

@@ -29,7 +29,7 @@ void test_oled_writer() {
     CHECK_W(writer.send(frame) == Status::ok && io.writes.size()==3 && io.recoveries==0);
     const auto setup=io.writes[0];
     CHECK_W(setup[0]==0 && setup[1]==0xae);
-    for (const auto pair : {std::vector<std::uint8_t>{0xa8,0x1f}, {0xda,0x02}, {0x81,0x8f}, {0x8d,0x14}, {0x20,0x00}})
+    for (const auto& pair : {std::vector<std::uint8_t>{0xa8,0x1f}, {0xda,0x02}, {0x81,0x8f}, {0x8d,0x14}, {0x20,0x00}})
         CHECK_W(std::search(setup.begin(),setup.end(),pair.begin(),pair.end())!=setup.end());
     CHECK_W(io.writes[1].size()==513 && io.writes[1][0]==0x40);
     CHECK_W(std::equal(frame.frame.begin(),frame.frame.end(),io.writes[1].begin()+1));

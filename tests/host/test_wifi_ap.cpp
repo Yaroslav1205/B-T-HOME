@@ -68,7 +68,8 @@ esp_err_t esp_wifi_set_config(int iface,const wifi_config_t* config) {
 }
 esp_err_t esp_wifi_start() {
  auto e=operation();if(e==ESP_OK){started=true;net->up=true;
- if(!net->station){CHECK(dhcp==ESP_NETIF_DHCP_INIT);dhcp=ESP_NETIF_DHCP_STARTED;callback(callback_context,WIFI_EVENT,WIFI_EVENT_AP_START,nullptr);}}
+ if(!net->station){CHECK(dhcp==ESP_NETIF_DHCP_INIT);CHECK(callback&&callback_context==net);
+ dhcp=ESP_NETIF_DHCP_STARTED;callback(callback_context,WIFI_EVENT,WIFI_EVENT_AP_START,nullptr);}}
  return e;
 }
 esp_err_t esp_wifi_stop() {started=false;if(net)net->up=false;return ESP_OK;}

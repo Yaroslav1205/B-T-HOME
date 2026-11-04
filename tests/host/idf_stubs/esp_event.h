@@ -4,8 +4,9 @@
 using esp_event_base_t = const char*;
 using esp_event_handler_instance_t = void*;
 using esp_event_handler_t = void (*)(void*, esp_event_base_t, std::int32_t, void*);
-inline constexpr const char* WIFI_EVENT = "wifi";
-inline constexpr const char* IP_EVENT = "ip";
+// ESP-IDF event bases have one identity across translation units.
+inline constexpr char WIFI_EVENT[] = "wifi";
+inline constexpr char IP_EVENT[] = "ip";
 constexpr int ESP_EVENT_ANY_ID = -1, WIFI_EVENT_AP_START = 1, WIFI_EVENT_AP_STACONNECTED = 2,
     WIFI_EVENT_AP_STADISCONNECTED = 3, IP_EVENT_AP_STAIPASSIGNED = 4;
 esp_err_t esp_event_loop_create_default();

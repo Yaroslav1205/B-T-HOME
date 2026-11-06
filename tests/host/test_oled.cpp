@@ -66,28 +66,35 @@ void test_oled() {
             oled.report(reading);
             CHECK_OLED(oled.report_value(1, 12.4, true) == Status::ok);
             oled.report_battery(battery);
-            const auto now = step * 3000;
+            const auto now = step * 4000;
             CHECK_OLED(oled.tick(now) == Status::ok);
             const bth::OledFrame expected[] = {
                 bth::render_voltage(reading.volts, true),
                 bth::render_battery(12.4, true, battery),
-                bth::render_ipv4(address), bth::render_outages(schedule)
+                bth::render_outages(schedule), bth::render_ipv4(address)
             };
             CHECK_OLED(bus.frames.back() == expected[step % 4]);
             const auto copy = oled.readings(now);
             CHECK_OLED(copy.average_valid && copy.average_volts == 230 + step);
             CHECK_OLED(copy.relay_valid && copy.relay_on);
+            if (step == 0) {
+                // Stay on mains through the old deadline and up to 4 seconds.
+                CHECK_OLED(oled.tick(3000) == Status::ok);
+                CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false));
+                CHECK_OLED(oled.tick(3999) == Status::ok);
+                CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false));
+            }
         }
-        // Disabling the schedule while it is visible returns to mains.
+        // Disabling the schedule on the last page wraps to mains.
         oled.report_outages({});
-        CHECK_OLED(oled.tick(21020) == Status::ok);
+        CHECK_OLED(oled.tick(28020) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(244, true));
-        CHECK_OLED(!oled.readings(23500).average_valid);
-        CHECK_OLED(oled.tick(24000) == Status::ok);
+        CHECK_OLED(!oled.readings(30500).average_valid);
+        CHECK_OLED(oled.tick(32000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_battery(0, false, {}));
-        CHECK_OLED(oled.tick(27000) == Status::ok);
+        CHECK_OLED(oled.tick(36000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_ipv4(address));
-        CHECK_OLED(oled.tick(30000) == Status::ok);
+        CHECK_OLED(oled.tick(40000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false));
         oled.deinit();
     }
@@ -130,10 +137,10 @@ void test_oled() {
         const bth::OutageDisplay value{bth::OutageDisplayState::interval, 12, 480, 1440};
         oled.report_outages(value);
         CHECK_OLED(oled.tick(0) == Status::ok);
-        CHECK_OLED(oled.tick(3000) == Status::ok);
+        CHECK_OLED(oled.tick(4000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_outages(value));
         oled.report_outages({});
-        CHECK_OLED(oled.tick(3020) == Status::ok);
+        CHECK_OLED(oled.tick(4020) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false));
         oled.deinit();
     }
@@ -170,27 +177,27 @@ void test_oled() {
         bth::Runtime runtime;
         CHECK_OLED(runtime.add(oled) == Status::ok && runtime.start() == Status::ok);
         CHECK_OLED(runtime.tick(0) == Status::ok && runtime.tick(2000) == Status::ok);
-        CHECK_OLED(runtime.tick(17000) == Status::ok);
+        CHECK_OLED(runtime.tick(22000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_relay(false, false));
-        CHECK_OLED(runtime.tick(20000) == Status::ok);
+        CHECK_OLED(runtime.tick(26000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_ipv4({}));
         oled.report_ipv4({192,168,1,123});
-        CHECK_OLED(runtime.tick(20020) == Status::ok);
+        CHECK_OLED(runtime.tick(26020) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_ipv4({192,168,1,123}));
         const auto frames = bus.frames.size();
-        CHECK_OLED(runtime.tick(20040) == Status::ok && frames == bus.frames.size());
+        CHECK_OLED(runtime.tick(26040) == Status::ok && frames == bus.frames.size());
         // Lost connection clears the displayed lease; reconnect can change it.
         oled.report_ipv4({});
-        CHECK_OLED(runtime.tick(21000) == Status::ok);
+        CHECK_OLED(runtime.tick(27000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_ipv4({}));
         oled.report_ipv4({10,0,0,5});
-        CHECK_OLED(runtime.tick(22000) == Status::ok);
+        CHECK_OLED(runtime.tick(28000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_ipv4({10,0,0,5}));
-        CHECK_OLED(runtime.tick(23000) == Status::ok);
+        CHECK_OLED(runtime.tick(30000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false));
         runtime.stop();
         CHECK_OLED(runtime.start() == Status::ok && runtime.tick(0) == Status::ok);
-        CHECK_OLED(runtime.tick(2000) == Status::ok && runtime.tick(20000) == Status::ok);
+        CHECK_OLED(runtime.tick(2000) == Status::ok && runtime.tick(26000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_ipv4({}));
         const auto longest = bth::render_ipv4({255,255,255,255});
         CHECK_OLED(longest != bth::render_ipv4({}) && longest != bth::render_ipv4({192,168,1,123}));
@@ -210,7 +217,7 @@ void test_oled() {
         bth::Runtime runtime;
         CHECK_OLED(runtime.add(oled) == Status::ok && runtime.start() == Status::ok);
         bth::BatteryEstimate estimate{725, true, true, false};
-        for (unsigned now = 0; now <= 3000; now += 1000) {
+        for (unsigned now = 0; now <= 4000; now += 1000) {
             oled.report_battery(estimate);
             CHECK_OLED(oled.report_value(1, 11.7, true) == Status::ok);
             CHECK_OLED(runtime.tick(now) == Status::ok);
@@ -220,11 +227,11 @@ void test_oled() {
         CHECK_OLED(remaining != bth::render_voltage(11.7, true, bth::VoltageKind::dc));
         estimate.mains_present = true;
         oled.report_battery(estimate);
-        CHECK_OLED(runtime.tick(3020) == Status::ok);
+        CHECK_OLED(runtime.tick(4020) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(11.7, true, bth::VoltageKind::dc));
         // Expired state must not keep a plausible time or a charging sign.
         CHECK_OLED(oled.report_value(1, 11.7, true) == Status::ok);
-        CHECK_OLED(runtime.tick(5520) == Status::ok);
+        CHECK_OLED(runtime.tick(6520) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_battery(11.7, true, {}));
         CHECK_OLED(bth::render_battery(12.8, true, {7200,true,true,false}) !=
                    bth::render_battery(12.8, true, {5999,true,true,false}));
@@ -245,23 +252,23 @@ void test_oled() {
         CHECK_OLED(runtime.add(oled) == Status::ok && runtime.start() == Status::ok);
         CHECK_OLED(runtime.tick(0) == Status::ok);
         CHECK_OLED(runtime.tick(2000) == Status::ok);
-        CHECK_OLED(runtime.tick(17000) == Status::ok);
+        CHECK_OLED(runtime.tick(22000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_relay(false, false));
         oled.report_relay(false, true);
-        CHECK_OLED(runtime.tick(17020) == Status::ok);
+        CHECK_OLED(runtime.tick(22020) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_relay(false, true));
         oled.report_relay(true, true);
-        CHECK_OLED(runtime.tick(17040) == Status::ok);
+        CHECK_OLED(runtime.tick(22040) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_relay(true, true));
         CHECK_OLED(bth::render_relay(true, true) != bth::render_relay(false, true));
         CHECK_OLED(bth::render_relay(false, false) != bth::render_relay(false, true));
         const auto count = bus.frames.size();
-        CHECK_OLED(runtime.tick(19999) == Status::ok && bus.frames.size() == count);
-        CHECK_OLED(runtime.tick(20000) == Status::ok);
+        CHECK_OLED(runtime.tick(25999) == Status::ok && bus.frames.size() == count);
+        CHECK_OLED(runtime.tick(26000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false));
         runtime.stop();
         CHECK_OLED(runtime.start() == Status::ok && runtime.tick(0) == Status::ok);
-        CHECK_OLED(runtime.tick(2000) == Status::ok && runtime.tick(17000) == Status::ok);
+        CHECK_OLED(runtime.tick(2000) == Status::ok && runtime.tick(22000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_relay(false, false));
     }
     {
@@ -270,12 +277,12 @@ void test_oled() {
         bth::Runtime runtime;
         CHECK_OLED(runtime.add(oled) == Status::ok && runtime.start() == Status::ok);
         oled.report_relay(true, true);
-        CHECK_OLED(runtime.tick(0) == Status::ok && runtime.tick(3000) == Status::ok);
+        CHECK_OLED(runtime.tick(0) == Status::ok && runtime.tick(4000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_relay(true, true));
         oled.report_relay(true, false);
-        CHECK_OLED(runtime.tick(3020) == Status::ok);
+        CHECK_OLED(runtime.tick(4020) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_relay(false, false));
-        CHECK_OLED(runtime.tick(6000) == Status::ok);
+        CHECK_OLED(runtime.tick(8000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false));
     }
     {
@@ -287,19 +294,19 @@ void test_oled() {
         reading.valid = reading.calibrated = true; reading.volts = 230;
         reading.history.current = {120000, true, true};
         reading.history.previous = {7200000, false, true};
-        for (unsigned ms = 0; ms <= 15000; ms += 1000) {
+        for (unsigned ms = 0; ms <= 20000; ms += 1000) {
             reading.volts = ms == 0 ? 230 : 240;
             oled.report(reading);
             CHECK_OLED(oled.report_value(1, 12.4, true) == Status::ok);
             CHECK_OLED(runtime.tick(ms) == Status::ok);
             if (ms == 0) CHECK_OLED(bus.frames.back() == bth::render_voltage(230, true));
-            if (ms == 3000) CHECK_OLED(bus.frames.back() == bth::render_voltage(237.5, true, bth::VoltageKind::average));
-            if (ms == 6000) CHECK_OLED(bus.frames.back() == bth::render_voltage(12.4, true, bth::VoltageKind::dc));
-            if (ms == 9000) CHECK_OLED(bus.frames.back() == bth::render_mains_period(reading.history.current, false));
-            if (ms == 12000) CHECK_OLED(bus.frames.back() == bth::render_mains_period(reading.history.previous, true));
-            if (ms == 15000) CHECK_OLED(bus.frames.back() == bth::render_voltage(240, true));
+            if (ms == 4000) CHECK_OLED(bus.frames.back() == bth::render_voltage(238, true, bth::VoltageKind::average));
+            if (ms == 8000) CHECK_OLED(bus.frames.back() == bth::render_voltage(12.4, true, bth::VoltageKind::dc));
+            if (ms == 12000) CHECK_OLED(bus.frames.back() == bth::render_mains_period(reading.history.current, false));
+            if (ms == 16000) CHECK_OLED(bus.frames.back() == bth::render_mains_period(reading.history.previous, true));
+            if (ms == 20000) CHECK_OLED(bus.frames.back() == bth::render_voltage(240, true));
         }
-        CHECK_OLED(runtime.tick(18000) == Status::ok);
+        CHECK_OLED(runtime.tick(24000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false, bth::VoltageKind::average));
         const auto under_hour = bth::render_mains_period({3599999,true,true}, false);
         const auto one_hour = bth::render_mains_period({3600000,true,true}, false);
@@ -315,7 +322,7 @@ void test_oled() {
                bth::render_mains_period({std::numeric_limits<std::uint64_t>::max(),true,true}, false));
         runtime.stop();
         CHECK_OLED(runtime.start() == Status::ok && runtime.tick(0) == Status::ok);
-        CHECK_OLED(runtime.tick(9000) == Status::ok);
+        CHECK_OLED(runtime.tick(12000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_mains_period({}, false));
     }
     {
@@ -333,12 +340,12 @@ void test_oled() {
         oled.report(reading);
         CHECK_OLED(runtime.tick(0) == Status::ok);
         oled.report(reading);
-        CHECK_OLED(runtime.tick(1000) == Status::ok);
-        CHECK_OLED(runtime.tick(3000) == Status::ok);
+        CHECK_OLED(runtime.tick(2000) == Status::ok);
+        CHECK_OLED(runtime.tick(4000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(131.5, true, bth::VoltageKind::average));
         reading.valid = false;
         oled.report(reading);
-        CHECK_OLED(runtime.tick(4000) == Status::ok);
+        CHECK_OLED(runtime.tick(5000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false, bth::VoltageKind::average));
         runtime.stop();
     }
@@ -358,7 +365,7 @@ void test_oled() {
             reading.volts = ms % 2000 == 0 ? 0 : 99.9;
             oled.report(reading);
             CHECK_OLED(runtime.tick(ms) == Status::ok);
-            if ((ms / 3000) % 2 == 1)
+            if ((ms / 4000) % 2 == 1)
                 CHECK_OLED(bus.frames.back() == bth::render_voltage(235, true, bth::VoltageKind::average));
             else
                 CHECK_OLED(bus.frames.back() == bth::render_voltage(reading.volts, true));
@@ -366,18 +373,18 @@ void test_oled() {
         reading.volts = 250; oled.report(reading);
         CHECK_OLED(runtime.tick(72000) == Status::ok);
         reading.volts = 100; oled.report(reading); // Exact presence threshold counts.
-        CHECK_OLED(runtime.tick(73000) == Status::ok && runtime.tick(75000) == Status::ok);
+        CHECK_OLED(runtime.tick(74000) == Status::ok && runtime.tick(76000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(205, true, bth::VoltageKind::average));
         reading.valid = false; oled.report(reading);
-        CHECK_OLED(runtime.tick(76000) == Status::ok);
+        CHECK_OLED(runtime.tick(77000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false, bth::VoltageKind::average));
         reading.valid = true; reading.volts = 0; oled.report(reading);
-        CHECK_OLED(runtime.tick(77000) == Status::ok);
+        CHECK_OLED(runtime.tick(78000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false, bth::VoltageKind::average));
         runtime.stop();
         CHECK_OLED(runtime.start() == Status::ok);
         oled.report(reading); CHECK_OLED(runtime.tick(0) == Status::ok);
-        oled.report(reading); CHECK_OLED(runtime.tick(3000) == Status::ok);
+        oled.report(reading); CHECK_OLED(runtime.tick(4000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false, bth::VoltageKind::average));
     }
     {
@@ -403,9 +410,9 @@ void test_oled() {
         CHECK_OLED(bus.frames.back() == bth::render_voltage(230.5, true));
         CHECK_OLED(oled.report_value(0, 231, true) == Status::ok);
         CHECK_OLED(oled.report_value(1, 12.5, true) == Status::ok);
-        CHECK_OLED(runtime.tick(base + 4999) == Status::ok);
+        CHECK_OLED(runtime.tick(base + 5999) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(231, true));
-        CHECK_OLED(runtime.tick(base + 5000) == Status::ok);
+        CHECK_OLED(runtime.tick(base + 6000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(12.5, true, bth::VoltageKind::dc));
         runtime.stop();
         CHECK_OLED(runtime.start() == Status::ok);
@@ -422,23 +429,23 @@ void test_oled() {
         bth::Runtime runtime;
         CHECK_OLED(runtime.add(oled) == Status::ok && runtime.start() == Status::ok);
         const auto base = 1ULL << 32;
-        for (unsigned ms = 0; ms <= 9000; ms += 20) {
+        for (unsigned ms = 0; ms <= 12000; ms += 20) {
             if (ms % 1000 == 0) {
                 CHECK_OLED(oled.report_value(0, 230.5, true) == Status::ok);
                 CHECK_OLED(oled.report_value(1, ms < 6000 ? 3.5 : 29.8, true) == Status::ok);
             }
             CHECK_OLED(runtime.tick(base + ms) == Status::ok);
-            const bool dc = (ms / 3000) % 2 == 1;
+            const bool dc = (ms / 4000) % 2 == 1;
             const double expected = dc ? (ms < 6000 ? 3.5 : 29.8) : 230.5;
             CHECK_OLED(bus.frames.back() == bth::render_voltage(expected, true,
                 dc ? bth::VoltageKind::dc : bth::VoltageKind::ac));
         }
         CHECK_OLED(oled.report_value(2, 12, true) == Status::invalid_argument);
         // Both pages expire independently while rotation continues.
-        CHECK_OLED(runtime.tick(base + 12000) == Status::ok);
+        CHECK_OLED(runtime.tick(base + 16000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(0, false));
         CHECK_OLED(oled.report_value(1, 12.4, true) == Status::ok);
-        CHECK_OLED(runtime.tick(base + 15000) == Status::ok);
+        CHECK_OLED(runtime.tick(base + 20000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(12.4, true, bth::VoltageKind::dc));
         runtime.stop();
         CHECK_OLED(runtime.start() == Status::ok);
@@ -520,7 +527,7 @@ void test_oled() {
         oled.report(reading);
         CHECK_OLED(runtime.tick(2000) == Status::ok);
         CHECK_OLED(bus.frames.back() == bth::render_voltage(231.2, true));
-        CHECK_OLED(runtime.tick(4499) == Status::ok && bus.frames.size() == 4);
+        CHECK_OLED(runtime.tick(4499) == Status::ok && bus.frames.size() == 3);
         CHECK_OLED(runtime.tick(4500) == Status::ok && bus.frames.back() == unavailable);
         oled.report(reading);
         CHECK_OLED(runtime.tick(5000) == Status::ok && bus.frames.back() != unavailable);
@@ -540,13 +547,13 @@ void test_oled() {
         bus.update_status = Status::hardware_error;
         CHECK_OLED(runtime.tick(20) == Status::ok);
         CHECK_OLED(bus.updating && bus.acquired && runtime.state() == bth::RuntimeState::running);
-        CHECK_OLED(runtime.tick(2999) == Status::ok && bus.frames.size() == count);
-        CHECK_OLED(runtime.tick(3000) == Status::ok && bus.frames.size() == count+1);
+        CHECK_OLED(runtime.tick(3999) == Status::ok && bus.frames.size() == count);
+        CHECK_OLED(runtime.tick(4000) == Status::ok && bus.frames.size() == count+1);
         CHECK_OLED(bus.updates.back().generation == 1);
         bus.update_status = Status::ok;
-        CHECK_OLED(runtime.tick(3020) == Status::ok);
+        CHECK_OLED(runtime.tick(4020) == Status::ok);
         bus.update_status = Status::internal_error;
-        CHECK_OLED(runtime.tick(3040) == Status::internal_error);
+        CHECK_OLED(runtime.tick(4040) == Status::internal_error);
         CHECK_OLED(!bus.updating && !bus.acquired);
     }
     {
@@ -574,7 +581,7 @@ void test_oled() {
         CHECK_OLED(bus.updates.back().contrast == 0x8f && bus.frames.back() == unavailable);
         CHECK_OLED(runtime.tick(0) == Status::ok && runtime.tick(20) == Status::ok);
         CHECK_OLED(bus.updates.size() == 1);
-        CHECK_OLED(runtime.tick(3000) == Status::ok && bus.updates.size() == 2);
+        CHECK_OLED(runtime.tick(4000) == Status::ok && bus.updates.size() == 2);
         CHECK_OLED(bus.updates.back().generation == 1 && bus.frames.back() == unavailable);
         CHECK_OLED(runtime.tick(100000) == Status::ok && bus.updates.size() == 3);
         runtime.stop(); runtime.stop(); oled.deinit();

@@ -5,6 +5,8 @@
 
 namespace bth {
 namespace {
+constexpr std::uint64_t page_duration_ms = 4000;
+
 // Fit the 23 mm raster into a 19 mm enclosure window offset 3 mm from the left.
 // Merge columns rather than dropping thin strokes; preserve all 32 rows.
 OledFrame fit_window(const OledFrame& source) noexcept {
@@ -491,21 +493,21 @@ Status OledModule::tick(std::uint64_t now_ms) noexcept {
         refresh = true;
     }
     if (!page_timed_) { page_since_ms_ = now_ms; page_timed_ = true; }
-    const auto steps = (now_ms - page_since_ms_) / 3000;
+    const auto steps = (now_ms - page_since_ms_) / page_duration_ms;
     const bool show_average = show_details_ && show_average_;
     const bool show_history = show_details_ && show_history_;
     const bool show_relay = show_details_ && show_relay_;
     const unsigned voltage_pages = page_count_ + (show_average ? 1 : 0);
     const unsigned relay_page = voltage_pages + (show_history ? 2 : 0);
-    const unsigned ip_page = relay_page + (show_relay ? 1 : 0);
-    const unsigned outage_page = ip_page + (show_ip_ ? 1 : 0);
     const bool show_outages = outages_.state != OutageDisplayState::hidden;
-    const unsigned total_pages = outage_page + (show_outages ? 1 : 0);
+    const unsigned outage_page = relay_page + (show_relay ? 1 : 0);
+    const unsigned ip_page = outage_page + (show_outages ? 1 : 0);
+    const unsigned total_pages = ip_page + (show_ip_ ? 1 : 0);
     const auto previous_page = active_page_;
     active_page_ = static_cast<unsigned>((active_page_ + steps % total_pages) % total_pages);
     refresh = refresh || steps != 0 || previous_page != active_page_;
     if (refresh) ++generation_;
-    page_since_ms_ += steps * 3000;
+    page_since_ms_ += steps * page_duration_ms;
     const bool average_page = show_average && active_page_ == 1;
     const bool voltage_page = active_page_ < voltage_pages;
     const unsigned data_page = average_page ? page_count_ :

@@ -1,7 +1,7 @@
 # Оновлення прошивки з GitHub
 
 Три програмні етапи реалізовані: пакет релізу, OTA на ESP32-C6 та кнопки
-у вебпанелі. Версія — **0.2.2**. Підтримується профіль `esp32c6_rgb8`,
+у вебпанелі. Версія — **0.2.3**. Підтримується профіль `esp32c6_rgb8`,
 Zigbee + Wi-Fi, підтверджені 4 MiB flash. Matter і generic-профілі не отримують OTA.
 
 ## Одноразовий перехід через USB
@@ -47,7 +47,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/idf.ps1 -Action flas
 ## Пакет і публікація релізу
 
 ```powershell
-python scripts/package_firmware.py --output build/firmware-0.2.2
+python scripts/package_firmware.py --output build/firmware-0.2.3
 ```
 
 Вихідна папка має бути новою. Скрипт створює application `.bin`, `manifest.json`

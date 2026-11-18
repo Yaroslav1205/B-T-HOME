@@ -5,6 +5,9 @@
 #include "esp_wifi_default.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+
+#define PROJECT_WIFI_STA_HOSTNAME           "B-T HOME"
+
 namespace bth {
 namespace {
 Status check(esp_err_t result) noexcept {
@@ -81,6 +84,11 @@ Status WifiAp::init() noexcept {
     if (result != ESP_OK) { return check(result); }
     result = station_ ? esp_wifi_set_default_wifi_sta_handlers() : esp_wifi_set_default_wifi_ap_handlers();
     if (result != ESP_OK) { return check(result); }
+    if (station_) {
+        // Set before Wi-Fi starts so the first DHCP request carries the device name.
+        result = esp_netif_set_hostname(netif_, PROJECT_WIFI_STA_HOSTNAME);
+        if (result != ESP_OK) return check(result);
+    }
     if (!station_) {
         result = configure_ap_network(netif_);
         if (result != ESP_OK) return check(result);
@@ -129,7 +137,8 @@ Status WifiAp::tick(std::uint64_t now) noexcept {
     esp_netif_ip_info_t info{};
     const bool online = esp_wifi_sta_get_ap_info(&ap) == ESP_OK && esp_netif_is_netif_up(netif_) &&
         esp_netif_get_ip_info(netif_, &info) == ESP_OK && info.ip.addr != 0;
-    if (online && !connected_) ESP_LOGI("wifi_sta", "Connected | http://" IPSTR, IP2STR(&info.ip));
+    if (online && !connected_) ESP_LOGI("wifi_sta", "Connected | hostname=%s | http://" IPSTR,
+                                      PROJECT_WIFI_STA_HOSTNAME, IP2STR(&info.ip));
     connected_ = online;
     const int slot = retry_.poll(now, online);
     if (slot < 0) return Status::ok;

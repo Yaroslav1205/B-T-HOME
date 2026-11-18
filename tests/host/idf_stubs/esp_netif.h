@@ -17,6 +17,7 @@ constexpr esp_err_t ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED = 0x5003;
 struct ip_event_ap_staipassigned_t { esp_netif_t* esp_netif; esp_ip4_addr_t ip; std::uint8_t mac[6]; };
 esp_err_t esp_netif_init();
 esp_netif_t* esp_netif_new(const esp_netif_config_t*);
+esp_err_t esp_netif_set_hostname(esp_netif_t*, const char*);
 esp_err_t esp_netif_get_ip_info(esp_netif_t*, esp_netif_ip_info_t*);
 esp_err_t esp_netif_set_ip_info(esp_netif_t*, const esp_netif_ip_info_t*);
 esp_err_t esp_netif_dhcps_stop(esp_netif_t*);

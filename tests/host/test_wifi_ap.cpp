@@ -7,6 +7,7 @@
 namespace {
 unsigned step=0, fail_at=0, handlers=0;
 bool loop=false, driver=false, started=false;
+char hostname[33]{};
 esp_netif_t* net=nullptr;
 esp_netif_dhcp_status_t dhcp=ESP_NETIF_DHCP_INIT;
 esp_netif_ip_info_t ip{};
@@ -33,7 +34,12 @@ esp_err_t esp_event_loop_create_default() {auto e=operation();if(e==ESP_OK){CHEC
 esp_err_t esp_event_loop_delete_default() {CHECK(loop&&!net&&!handlers&&!driver);loop=false;return ESP_OK;}
 esp_netif_t* esp_netif_new(const esp_netif_config_t* config) {
  if(operation()!=ESP_OK)return nullptr;
- CHECK(!net);net=new esp_netif_t{config->station};dhcp=ESP_NETIF_DHCP_INIT;return net;
+ CHECK(!net);net=new esp_netif_t{config->station};hostname[0]='\0';dhcp=ESP_NETIF_DHCP_INIT;return net;
+}
+esp_err_t esp_netif_set_hostname(esp_netif_t* value,const char* name) {
+ CHECK(value==net&&net->station&&!started&&!net->up);
+ CHECK(std::strlen(name)<sizeof(hostname));
+ auto e=operation();if(e==ESP_OK)std::memcpy(hostname,name,std::strlen(name)+1);return e;
 }
 void esp_netif_destroy_default_wifi(esp_netif_t* value) {CHECK(value==net&&!handlers&&!driver);delete net;net=nullptr;}
 esp_err_t esp_netif_attach_wifi_station(esp_netif_t*) {return operation();}
@@ -67,6 +73,7 @@ esp_err_t esp_wifi_set_config(int iface,const wifi_config_t* config) {
  return operation();
 }
 esp_err_t esp_wifi_start() {
+ CHECK(net->station ? std::strcmp(hostname,"B-T HOME")==0 : hostname[0]=='\0');
  auto e=operation();if(e==ESP_OK){started=true;net->up=true;
  if(!net->station){CHECK(dhcp==ESP_NETIF_DHCP_INIT);CHECK(callback&&callback_context==net);
  dhcp=ESP_NETIF_DHCP_STARTED;callback(callback_context,WIFI_EVENT,WIFI_EVENT_AP_START,nullptr);}}
@@ -87,6 +94,12 @@ int main() {
   CHECK(wifi.tick(0)==bth::Status::ok);
   if(!station)CHECK((wifi.ipv4_address()==std::array<std::uint8_t,4>{192,168,4,1}));
   wifi.deinit();wifi.deinit();CHECK(!net&&!loop&&!driver&&!handlers);
+  // A new STA interface must receive the hostname again after a mode switch.
+  for(bool next_station:{!station,station}) {
+   wifi.select_station(next_station);
+   CHECK(wifi.init()==bth::Status::ok&&wifi.start()==bth::Status::ok);
+   wifi.deinit();wifi.deinit();CHECK(!net&&!loop&&!driver&&!handlers);
+  }
   for(unsigned failure=1;failure<=count;++failure){
    step=0;fail_at=failure;
    bth::WifiAp broken(settings);broken.select_station(station);
@@ -95,5 +108,5 @@ int main() {
    CHECK(!net&&!loop&&!driver&&!handlers);
   }
  }
- std::cout<<"AP DHCP initialization and partial cleanup passed\n";
+ std::cout<<"AP DHCP, STA hostname, mode switches and partial cleanup passed\n";
 }
